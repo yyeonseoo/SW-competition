@@ -14,3 +14,8 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# 로컬 전용 문서/설정 
+JY_local/
+CLAUDE.md
+.claude/

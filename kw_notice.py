@@ -132,8 +132,14 @@ def extract_body_text(soup):
 def analyze_text(title, body_text, board_category):
     combined = clean_text(f"{title} {body_text}")
 
-    # 봉사·등록/장학 게시판은 사용자 확정 규칙에 따라 기타
-    forced = "기타" if board_category in {"봉사", "등록/장학"} else None
+    # 봉사 게시판은 사용자 확정 규칙에 따라 기타로 고정.
+    # 등록/장학 게시판은 활동카테고리 '장학·지원'으로 고정.
+    if board_category == "봉사":
+        forced = "기타"
+    elif board_category == "등록/장학":
+        forced = "장학·지원"
+    else:
+        forced = None
     activity_category, category_found = classify_activity_category(
         combined, forced_category=forced
     )

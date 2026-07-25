@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 DB_NAME = "recommendation.db"
 KST = ZoneInfo("Asia/Seoul")
 
-ACTIVITY_CATEGORIES = ["대외활동", "공모전", "교육", "기타"]
+ACTIVITY_CATEGORIES = ["대외활동", "공모전", "인턴·채용", "교육", "장학·지원", "기타"]
 
 INTEREST_CATEGORIES = [
     "여행/호텔/항공",
@@ -76,9 +76,17 @@ CATEGORY_RULES = {
         "대외활동", "서포터즈", "기자단", "홍보대사", "봉사단",
         "멘토단", "체험단", "모니터링단", "기획단", "청년단", "앰버서더",
     ],
+    "인턴·채용": [
+        "인턴", "인턴십", "채용", "공채", "수시채용", "현장실습",
+        "채용연계형", "체험형인턴", "청년인턴", "인턴사원",
+    ],
     "교육": [
         "교육", "특강", "강연", "워크숍", "세미나", "아카데미",
         "부트캠프", "캠프", "실습", "연수", "강좌", "교육생",
+    ],
+    "장학·지원": [
+        "장학", "장학금", "장학생", "학자금", "지원금", "생활비 지원",
+        "등록금 지원", "근로장학",
     ],
 }
 
@@ -127,10 +135,18 @@ def classify_activity_category(text, forced_category=None):
         return forced_category, True
 
     lowered = clean_text(text).lower()
-    for category in ("공모전", "대외활동", "교육"):
+    for category in ("공모전", "인턴·채용", "대외활동", "교육", "장학·지원"):
         if any(keyword.lower() in lowered for keyword in CATEGORY_RULES[category]):
             return category, True
     return "기타", False
+
+
+def classify_campus_scope(source, board_category=""):
+    """광운대 공지의 [외부] 카테고리만 교외, 그 외 광운대 공지는 교내.
+    링커리어 등 학교 밖 소스는 항상 교외."""
+    if source == "광운대학교":
+        return "교외" if board_category == "외부" else "교내"
+    return "교외"
 
 
 def classify_interest_categories(text):
@@ -192,6 +208,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source TEXT NOT NULL,
             source_section TEXT,
+            campus_scope TEXT,
             title TEXT NOT NULL,
             url TEXT UNIQUE NOT NULL,
             activity_category TEXT NOT NULL,
@@ -213,6 +230,14 @@ def init_db():
             last_seen_at TEXT
         )
         """)
+
+        # campus_scope는 기존 DB에 없을 수 있으므로 안전하게 추가한다.
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(activities)")
+        }
+        if "campus_scope" not in existing_columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN campus_scope TEXT")
+
         conn.execute("""
         CREATE TABLE IF NOT EXISTS students (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,6 +260,9 @@ def save_activity(item):
 
         serialized = {
             **item,
+            "campus_scope": classify_campus_scope(
+                item["source"], item.get("source_section", "")
+            ),
             "interest_categories": json.dumps(item["interest_categories"], ensure_ascii=False),
             "target": json.dumps(item["target"], ensure_ascii=False),
             "missing_before_ocr": json.dumps(item.get("missing_before_ocr", []), ensure_ascii=False),
@@ -243,13 +271,13 @@ def save_activity(item):
         if existing is None:
             conn.execute("""
             INSERT INTO activities (
-                source, source_section, title, url, activity_category,
+                source, source_section, campus_scope, title, url, activity_category,
                 interest_categories, region_sido, region_sigungu, region_detail,
                 region_status, target, target_raw, reference_date, date_basis, body_text,
                 ocr_text, ocr_used, missing_before_ocr, review_required,
                 first_seen_at, last_seen_at
             ) VALUES (
-                :source, :source_section, :title, :url, :activity_category,
+                :source, :source_section, :campus_scope, :title, :url, :activity_category,
                 :interest_categories, :region_sido, :region_sigungu, :region_detail,
                 :region_status, :target, :target_raw, :reference_date, :date_basis, :body_text,
                 :ocr_text, :ocr_used, :missing_before_ocr, :review_required,
@@ -262,6 +290,7 @@ def save_activity(item):
         UPDATE activities SET
             source=:source,
             source_section=:source_section,
+            campus_scope=:campus_scope,
             title=:title,
             activity_category=:activity_category,
             interest_categories=:interest_categories,

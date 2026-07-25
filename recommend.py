@@ -117,16 +117,27 @@ def recommend_for_student(student_name):
             activity["interest_categories"], ["기타"]
         )
 
-        if not department_matches(student["department"], activity["target_raw"]):
-            continue
+        is_scholarship = activity["activity_category"] == "장학·지원"
+        is_internship = activity["activity_category"] == "인턴·채용"
+
+        # 장학·지원은 전공 불문: 학과·관심분야 조건을 적용하지 않고 지역·학년만 본다.
+        if not is_scholarship:
+            if not department_matches(student["department"], activity["target_raw"]):
+                continue
+            if not interest_matches(
+                student["interest_categories"],
+                activity["interest_categories"],
+            ):
+                continue
+
         if not grade_matches(student["grade"], activity["target_raw"]):
             continue
-        if not region_matches(student, activity):
+
+        # 인턴·채용은 본문에 학년 조건이 없어도 정책상 2학년 이상만 노출한다.
+        if is_internship and student["grade"] < 2:
             continue
-        if not interest_matches(
-            student["interest_categories"],
-            activity["interest_categories"],
-        ):
+
+        if not region_matches(student, activity):
             continue
 
         results.append(activity)
