@@ -15,7 +15,14 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# 로컬 전용 문서/설정 
+# 로컬 전용 문서/설정
 JY_local/
 CLAUDE.md
 .claude/
+
+# 수집기(link.py/kw_notice.py) 실행 산출물 - 매번 재생성됨
+kw_recent.csv
+kw_recent.json
+kw_review.csv
+linkareer_recent.csv
+linkareer_recent.json

@@ -20,6 +20,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
   const [sigungu, setSigungu] = useState(student.region_sigungu);
   const [interests, setInterests] = useState<string[]>(student.interest_categories);
   const [notifyOptIn, setNotifyOptIn] = useState(student.notify_opt_in === 1);
+  const [isInternational, setIsInternational] = useState(student.is_international === 1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +43,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
         region_sigungu: sigungu,
         interest_categories: interests,
         notify_opt_in: notifyOptIn ? 1 : 0,
+        is_international: isInternational ? 1 : 0,
       });
       onSaved(updated);
     } catch (err) {
@@ -137,6 +139,18 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+          <div className="field">
+            <div className="toggle-row">
+              <div className="label">
+                <b>🌐 국제학생(유학생)이에요</b>
+                <small>켜면 국제학생 대상 공지도 함께 보여드려요</small>
+              </div>
+              <div
+                className={`toggle${isInternational ? " on" : ""}`}
+                onClick={() => setIsInternational((v) => !v)}
+              />
             </div>
           </div>
 

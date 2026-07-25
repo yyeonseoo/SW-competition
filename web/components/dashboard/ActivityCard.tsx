@@ -16,13 +16,15 @@ export default function ActivityCard({ card }: Props) {
         <span className={`badge cat ${badgeClassFor(card.activity_category)}`}>
           {displayLabelFor(card.activity_category)}
         </span>
-        {card.interest_categories
-          .filter((tag) => tag !== "기타")
-          .map((tag) => (
-            <span key={tag} className="badge">
-              {tag}
-            </span>
-          ))}
+        {/* 교내는 관심분야로 필터링하지 않으므로(학과만 봄) 관심분야 뱃지도 보여주지 않는다. */}
+        {card.campus_scope === "교외" &&
+          card.interest_categories
+            .filter((tag) => tag !== "기타")
+            .map((tag) => (
+              <span key={tag} className="badge">
+                {tag}
+              </span>
+            ))}
         {card.region_relevant && regionLabel && (
           <span className="badge region">📍 {regionLabel}</span>
         )}

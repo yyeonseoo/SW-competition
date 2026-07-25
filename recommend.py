@@ -105,24 +105,25 @@ def region_matches(student, activity):
 
 
 def interest_matches(student_interests, activity_interests):
+    # 관심분야를 하나도 안 골랐으면 관심분야 조건은 적용하지 않는다(학과 정보만으로 추천).
+    if not student_interests:
+        return True
     # 기타는 미분류 상태이므로 자동 제외하지 않는다.
     if activity_interests == ["기타"]:
         return True
     return bool(set(student_interests) & set(activity_interests))
 
 
-def should_apply_region_filter(activity):
-    """새 지역 매칭 규칙: 교내 일반 활동은 지역 무관, 교내 장학·지원과
-    교외(전 카테고리)는 지역 매칭을 적용한다."""
-    if activity["campus_scope"] == "교내" and activity["activity_category"] != "장학·지원":
-        return False
-    return True
-
-
 def _student_from_row(row):
     student = dict(row)
     student["interest_categories"] = load_json(student["interest_categories"], [])
     return student
+
+
+# [국제학생] 게시판 공지는 유학생 대상 안내(수강신청/장학금/기숙사 등)라 국내 학생에게는
+# 노출하지 않는다. [국제교류] 게시판은 KW 재학생의 해외교환·인턴십 등 국내 학생도 볼 대상이라
+# 별도로 취급하지 않는다(그대로 노출).
+INTERNATIONAL_ONLY_BOARD_CATEGORIES = {"국제학생"}
 
 
 def _match_activities(student, activity_rows):
@@ -133,13 +134,24 @@ def _match_activities(student, activity_rows):
             activity["interest_categories"], ["기타"]
         )
 
+        # 국제학생 전용 게시판은 국제학생으로 표시된 학생에게만 노출한다.
+        if (
+            activity["source_section"] in INTERNATIONAL_ONLY_BOARD_CATEGORIES
+            and not student.get("is_international")
+        ):
+            continue
+
         is_scholarship = activity["activity_category"] == "장학·지원"
         is_internship = activity["activity_category"] == "인턴·채용"
+        is_internal = activity["campus_scope"] == "교내"
 
-        # 장학·지원은 전공 불문: 학과·관심분야 조건을 적용하지 않고 지역·학년만 본다.
+        # 장학·지원은 전공 불문: 학과 조건을 적용하지 않는다.
         if not is_scholarship:
             if not department_matches(student["department"], activity["target_raw"]):
                 continue
+
+        # 교내 프로그램은 관심분야를 보지 않는다(학과·지역만 본다). 교외는 기존대로 관심분야를 본다.
+        if not is_internal and not is_scholarship:
             if not interest_matches(
                 student["interest_categories"],
                 activity["interest_categories"],
@@ -153,7 +165,9 @@ def _match_activities(student, activity_rows):
         if is_internship and student["grade"] < 2:
             continue
 
-        if should_apply_region_filter(activity) and not region_matches(student, activity):
+        # 지역: 교내 일반은 지역 무관(온캠퍼스 행사의 "장소" 주소가 거주지 제한으로 잘못
+        # 추출되는 사례가 있어 지역을 걸면 정상 공고까지 막힘). 교내 장학·지원과 교외 전체만 확인.
+        if (not is_internal or is_scholarship) and not region_matches(student, activity):
             continue
 
         results.append(activity)
@@ -218,9 +232,11 @@ def _card_from_activity(activity):
     dday = compute_dday(deadline_date)
     first_seen = (activity.get("first_seen_at") or "")[:10]
 
-    # 지역 뱃지는 새 지역 규칙이 실제로 적용되고, 지역이 하나로 확정된 경우에만 보여준다.
+    # 지역 뱃지는 실제로 지역 조건이 적용되는 경우에만 보여준다(교내 장학·지원, 교외 전체).
+    is_internal = activity["campus_scope"] == "교내"
+    is_scholarship = activity["activity_category"] == "장학·지원"
     region_relevant = (
-        should_apply_region_filter(activity) and activity["region_status"] == "resolved"
+        (not is_internal or is_scholarship) and activity["region_status"] == "resolved"
     )
 
     return {

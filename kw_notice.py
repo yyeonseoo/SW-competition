@@ -13,10 +13,13 @@ from common import (
     clean_text,
     extract_target_text,
     init_db,
+    is_noise_notice,
     is_recent_upload,
+    is_staff_hiring_notice,
     normalize_date,
     normalize_target,
     save_activity,
+    strip_title_noise,
 )
 from ocr_utils import ocr_page_images
 from regions import extract_region
@@ -27,8 +30,11 @@ LIST_URL_TEMPLATE = (
     "?srCategoryId=&mode=list&searchKey=1&searchVal=&tpage={page}"
 )
 SOURCE = "광운대학교"
-MAX_PAGES = 5
+MAX_PAGES = 20
 REQUEST_DELAY = 1.0
+# 링커리어(link.py)는 팀원 규칙대로 최근 3일(is_recent_upload 기본값)을 유지하고,
+# 광운대 공지는 게시물이 뜸해서 30일(한 달)로 넓힌다.
+KW_DAYS_BACK = 15
 
 HEADERS = {
     "User-Agent": (
@@ -65,7 +71,18 @@ def extract_written_date(row_text):
     return normalize_date(match.group(1)) if match else ""
 
 
-def infer_board_category(row_text):
+def extract_bracket_category(title):
+    """제목 맨 앞 '[카테고리]' 표기를 그대로 게시판 카테고리로 쓴다.
+    광운대 공지 목록의 실제 태그(학사/일반/학생/국제학생/국제교류/병무 등)를 놓치지 않고 잡아낸다."""
+    match = re.match(r"^\s*\[([^\]]+)\]", title)
+    return match.group(1) if match else ""
+
+
+def infer_board_category(title, row_text):
+    bracket = extract_bracket_category(title)
+    if bracket:
+        return bracket
+
     for category in ["봉사", "등록/장학", "외부", "학생", "학사", "일반"]:
         if category in row_text:
             return category
@@ -89,21 +106,32 @@ def collect_recent_notices():
             if url in seen:
                 continue
 
-            title = clean_text(tag.get_text(" ", strip=True))
+            title = strip_title_noise(tag.get_text(" ", strip=True))
             row_text = find_notice_row_text(tag)
             written_date = extract_written_date(row_text)
 
-            if not title or not written_date or not is_recent_upload(written_date):
+            if not title or not written_date or not is_recent_upload(written_date, days_back=KW_DAYS_BACK):
                 continue
 
             page_recent_count += 1
             seen.add(url)
+
+            board_category = infer_board_category(title, row_text)
+
+            if is_staff_hiring_notice(title):
+                print(f"  → 제외(학교 직원 채용 공고): {title}")
+                continue
+
+            if is_noise_notice(title, board_category):
+                print(f"  → 제외(학사·행정 공지): {title}")
+                continue
+
             results.append({
                 "title": title,
                 "url": url,
                 "reference_date": written_date,
                 "date_basis": "작성일",
-                "board_category": infer_board_category(row_text),
+                "board_category": board_category,
             })
 
         if page > 1 and page_recent_count == 0:
@@ -184,6 +212,14 @@ def parse_notice(notice):
         ocr_used = 1 if processed_count > 0 else 0
 
     final_body = clean_text(f"{body_text} {ocr_text}")
+
+    # 제목만으로는 못 걸렀지만 본문·OCR까지 합쳐보면 노이즈로 판단되는 경우 여기서 제외한다
+    # (예: 포스터 이미지 OCR 결과에 "수강신청"/"행복기숙사(빛솔재)" 등이 나오는 경우).
+    combined_for_noise = clean_text(f"{notice['title']} {final_body}")
+    board_category = notice.get("board_category", "")
+    if is_staff_hiring_notice(combined_for_noise) or is_noise_notice(combined_for_noise, board_category):
+        return None
+
     final = analyze_text(
         notice["title"], final_body, notice.get("board_category", "")
     )
@@ -233,10 +269,15 @@ def main():
     print(f"광운대 최근 공지: {len(notices)}개")
 
     saved, review = [], []
+    excluded_after_detail = 0
     for index, notice in enumerate(notices, start=1):
         print(f"[{index}/{len(notices)}] {notice['title']}")
         try:
             item = parse_notice(notice)
+            if item is None:
+                excluded_after_detail += 1
+                print("  → 제외(본문·OCR 확인 후 학사·행정 공지로 판단)")
+                continue
             is_new = save_activity(item)
             saved.append(item)
             if item["review_required"]:
@@ -258,7 +299,10 @@ def main():
     with open("kw_recent.json", "w", encoding="utf-8") as file:
         json.dump(saved, file, ensure_ascii=False, indent=2)
 
-    print(f"\n저장 {len(saved)}개 / 검토 필요 {len(review)}개")
+    print(
+        f"\n저장 {len(saved)}개 / 검토 필요 {len(review)}개 / "
+        f"본문·OCR 확인 후 제외 {excluded_after_detail}개"
+    )
 
 
 if __name__ == "__main__":

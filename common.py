@@ -73,6 +73,50 @@ DATE_PATTERN = r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})"
 DEADLINE_LABELS = ["마감일", "마감기한", "접수마감", "신청마감", "모집마감", "제출마감"]
 PERIOD_LABELS = ["접수기간", "신청기간", "모집기간", "지원기간", "공고기간", "활동기간"]
 
+STAFF_HIRING_KEYWORDS = [
+    "기간제", "계약직원", "계약직", "무기계약직", "공무직", "일용직",
+    "교직원채용", "직원채용", "행정직원채용",
+]
+
+# 수강신청/성적/휴복학 같은 학사·행정 공지, 시설·서비스 안내, 학교 자체 인사 공고 등
+# '기회성 프로그램'이 아닌 게시글을 걸러내기 위한 목록. 제목 키워드 기반이라 오분류 가능성은
+# notice.md의 다른 키워드 사전들과 동일한 한계를 가진다(사전 튜닝 필요).
+NOISE_KEYWORDS = [
+    # 학사 행정
+    "수강신청", "학사경고", "성적정정", "휴학", "복학", "등록금고지서", "졸업사정",
+    "수업계획서", "강의평가", "시간표", "이수 체계도 안내",
+    # 시설/서비스 안내 (청소/승강기는 board_category="시설" 통째 제외로 대체 — 아래 참고)
+    "복구안내", "중단안내", "서비스복구", "정전", "점검안내", "주차안내", "도서관안내",
+    "장소사용", "초빙"
+    # 기타 행정
+    "상해보험", "단체교섭", "병무", "현역병모집",
+    "수상자 발표", "부고", "행복기숙사(빛솔재)", "사무실 이전", "사칭 물품", "셔틀버스", "장소 사용"
+]
+
+# 이 게시판 카테고리는 사실상 전부 학사·시설 행정 공지라 통째로 제외한다.
+# "시설"(승강기 운행정지/외벽 청소/공사 안내 등)은 실제 수집 데이터로 전부 확인함 —
+NOISE_BOARD_CATEGORIES = {"학사", "병무", "시설"}
+
+_TITLE_NOISE_RE = re.compile(r"(신규게시글|Attachment|조회수\s*\d+)")
+
+
+def strip_title_noise(title):
+    """게시판 목록에서 제목과 함께 붙어오는 'NEW'/첨부파일/조회수 표시를 제거한다."""
+    return clean_text(_TITLE_NOISE_RE.sub("", title or ""))
+
+
+def is_noise_notice(text, board_category=""):
+    """수강신청 등 학사·행정 공지, 시설 안내처럼 비교과 활동 추천과 무관한 게시글인지 판별한다.
+    제목만이 아니라 본문·OCR 텍스트까지 합친 문자열도 넘길 수 있다.
+
+    단순 substring 매칭이다 — compact_text로 공백을 지운 뒤에는 한글 단어 경계를 규칙적으로
+    판정할 방법이 없어서(모든 글자가 한글로 붙어버림), 대신 키워드 자체를 다른 단어와 안 겹치게
+    구체적으로 고른다(예: "청소"는 "청소년"과 겹쳐서 빼고 board_category="시설" 제외로 대체함)."""
+    if board_category in NOISE_BOARD_CATEGORIES:
+        return True
+    compact = compact_text(text)
+    return any(keyword in compact for keyword in NOISE_KEYWORDS)
+
 CATEGORY_RULES = {
     "공모전": [
         "공모전", "경진대회", "해커톤", "아이디어대회", "아이디어 대회",
@@ -192,6 +236,13 @@ def classify_activity_category(text, forced_category=None):
     return "기타", False
 
 
+def is_staff_hiring_notice(text):
+    """학교 자체 직원(기간제/계약직 등) 채용 공고인지 판별한다. 학생 대상 인턴·채용 기회가 아니므로
+    수집 단계에서 걸러낸다 — 예: '[일반] 기간제 계약직원 채용 공고(공과대학 교학팀)'."""
+    compact = compact_text(text)
+    return any(keyword in compact for keyword in STAFF_HIRING_KEYWORDS)
+
+
 def classify_campus_scope(source, board_category=""):
     """광운대 공지의 [외부] 카테고리만 교외, 그 외 광운대 공지는 교내.
     링커리어 등 학교 밖 소스는 항상 교외."""
@@ -309,11 +360,12 @@ def init_db():
             region_sido TEXT NOT NULL,
             region_sigungu TEXT,
             email TEXT,
-            notify_opt_in INTEGER DEFAULT 1
+            notify_opt_in INTEGER DEFAULT 1,
+            is_international INTEGER DEFAULT 0
         )
         """)
 
-        # email/notify_opt_in은 기존 DB에 없을 수 있으므로 안전하게 추가한다.
+        # email/notify_opt_in/is_international은 기존 DB에 없을 수 있으므로 안전하게 추가한다.
         student_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(students)")
         }
@@ -322,6 +374,10 @@ def init_db():
         if "notify_opt_in" not in student_columns:
             conn.execute(
                 "ALTER TABLE students ADD COLUMN notify_opt_in INTEGER DEFAULT 1"
+            )
+        if "is_international" not in student_columns:
+            conn.execute(
+                "ALTER TABLE students ADD COLUMN is_international INTEGER DEFAULT 0"
             )
 
 
@@ -333,6 +389,7 @@ def create_student(
     region_sigungu="",
     email=None,
     notify_opt_in=1,
+    is_international=0,
     name=None,
 ):
     """프로필 온보딩에서 학생을 새로 등록한다. 프로토타입 온보딩 화면에는 이름 입력이
@@ -343,8 +400,8 @@ def create_student(
             """
             INSERT INTO students (
                 name, department, grade, interest_categories,
-                region_sido, region_sigungu, email, notify_opt_in
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                region_sido, region_sigungu, email, notify_opt_in, is_international
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -355,6 +412,7 @@ def create_student(
                 region_sigungu,
                 email,
                 notify_opt_in,
+                is_international,
             ),
         )
         return cursor.lastrowid

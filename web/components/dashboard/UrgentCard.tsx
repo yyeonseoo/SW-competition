@@ -19,14 +19,15 @@ export default function UrgentCard({ card }: Props) {
         <span className={`badge cat ${badgeClassFor(card.activity_category)}`}>
           {displayLabelFor(card.activity_category)}
         </span>
-        {card.interest_categories
-          .filter((tag) => tag !== "기타")
-          .slice(0, 2)
-          .map((tag) => (
-            <span key={tag} className="badge">
-              {tag}
-            </span>
-          ))}
+        {card.campus_scope === "교외" &&
+          card.interest_categories
+            .filter((tag) => tag !== "기타")
+            .slice(0, 2)
+            .map((tag) => (
+              <span key={tag} className="badge">
+                {tag}
+              </span>
+            ))}
       </div>
       <h4>{card.title}</h4>
       <div className="meta">

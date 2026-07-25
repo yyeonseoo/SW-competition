@@ -8,6 +8,7 @@ export interface Student {
   region_sigungu: string;
   email: string | null;
   notify_opt_in: number;
+  is_international: number;
 }
 
 export interface ActivityCard {
@@ -67,4 +68,5 @@ export interface StudentInput {
   interest_categories: string[];
   email?: string | null;
   notify_opt_in?: number;
+  is_international?: number;
 }

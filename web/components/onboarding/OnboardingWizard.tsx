@@ -27,6 +27,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [interests, setInterests] = useState<string[]>([]);
   const [notifyOptIn, setNotifyOptIn] = useState(true);
   const [email, setEmail] = useState("");
+  const [isInternational, setIsInternational] = useState(false);
 
   useEffect(() => {
     getMeta()
@@ -52,6 +53,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
         interest_categories: interests,
         email: email || null,
         notify_opt_in: notifyOptIn ? 1 : 0,
+        is_international: isInternational ? 1 : 0,
       });
       setStoredStudentId(student.id);
       onComplete(student.id);
@@ -114,6 +116,8 @@ export default function OnboardingWizard({ onComplete }: Props) {
                   setSigungu("");
                 }}
                 onChangeSigungu={setSigungu}
+                isInternational={isInternational}
+                onToggleInternational={() => setIsInternational((v) => !v)}
               />
             ) : (
               <p className="lead">지역 목록을 불러오는 중...</p>

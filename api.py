@@ -38,6 +38,7 @@ class StudentIn(BaseModel):
     interest_categories: List[str] = []
     email: Optional[str] = None
     notify_opt_in: int = 1
+    is_international: int = 0
 
 
 class StudentPatch(BaseModel):
@@ -48,6 +49,7 @@ class StudentPatch(BaseModel):
     interest_categories: Optional[List[str]] = None
     email: Optional[str] = None
     notify_opt_in: Optional[int] = None
+    is_international: Optional[int] = None
 
 
 def _student_response(student_id):
@@ -76,6 +78,7 @@ def post_student(body: StudentIn):
         region_sigungu=body.region_sigungu,
         email=body.email,
         notify_opt_in=body.notify_opt_in,
+        is_international=body.is_international,
     )
     return _student_response(student_id)
 
