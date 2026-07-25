@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+from datetime import datetime
 
 from common import (
     DB_NAME,
@@ -11,6 +12,7 @@ from common import (
     today_kst,
 )
 from departments import COLLEGES, all_departments, college_of
+from embedding_utils import cosine_similarity, ensure_student_embedding
 
 # 긴 이름부터 찾아 부분 문자열 충돌을 줄인다(regions.py의 지역 매칭과 같은 방식).
 _ALL_DEPARTMENTS = sorted(all_departments(), key=len, reverse=True)
@@ -120,10 +122,149 @@ def _student_from_row(row):
     return student
 
 
+def structured_eligibility_matches(student, activity):
+    """GPT가 구조화한 명시적 자격 조건만 검사한다.
+
+    아직 구조화되지 않은 공고는 기존 규칙으로 처리해 점진적으로 도입할 수 있다.
+    """
+    structured = load_json(activity.get("structured_data"), None)
+    if not structured:
+        return True
+    if not structured.get("recommendable", True):
+        return False
+    if structured.get("student_eligible") is False:
+        return False
+    if (
+        structured.get("international_student_required")
+        and not student.get("is_international")
+    ):
+        return False
+
+    grade_min = structured.get("grade_min")
+    grade_max = structured.get("grade_max")
+    if grade_min is not None and student["grade"] < grade_min:
+        return False
+    if grade_max is not None and student["grade"] > grade_max:
+        return False
+
+    enrollment_types = set(structured.get("eligible_enrollment_types") or [])
+    meaningful_types = enrollment_types - {"unknown", "all_students"}
+    if meaningful_types:
+        # 현재 온보딩 사용자는 학부 재학생이며, 1학년만 신입생으로 판단한다.
+        current_types = {"enrolled"}
+        if student["grade"] == 1:
+            current_types.add("freshman")
+        if not current_types & meaningful_types:
+            return False
+
+    major_rule = structured.get("major_restriction")
+    eligible_majors = structured.get("eligible_majors") or []
+    excluded_majors = structured.get("excluded_majors") or []
+    # 모델이 "기계", "전기전자", "CAD" 같은 계열·기술명을 전공으로 반환할 수 있다.
+    # 실제 학과/단과대학 목록과 정확히 대응되는 값만 하드 필터로 사용하고 나머지는
+    # 이후 의미 유사도 점수의 재료로 남긴다.
+    known_eligible = [
+        major
+        for major in eligible_majors
+        if major in _ALL_DEPARTMENTS or major in _ALL_COLLEGES
+    ]
+    known_excluded = [
+        major
+        for major in excluded_majors
+        if major in _ALL_DEPARTMENTS or major in _ALL_COLLEGES
+    ]
+    student_college = college_of(student["department"])
+    if major_rule == "include_only" and known_eligible:
+        if (
+            student["department"] not in known_eligible
+            and student_college not in known_eligible
+        ):
+            return False
+    if major_rule == "exclude_only" and (
+        student["department"] in known_excluded
+        or student_college in known_excluded
+    ):
+        return False
+    return True
+
+
 # [국제학생] 게시판 공지는 유학생 대상 안내(수강신청/장학금/기숙사 등)라 국내 학생에게는
 # 노출하지 않는다. [국제교류] 게시판은 KW 재학생의 해외교환·인턴십 등 국내 학생도 볼 대상이라
 # 별도로 취급하지 않는다(그대로 노출).
 INTERNATIONAL_ONLY_BOARD_CATEGORIES = {"국제학생"}
+STRUCTURED_EXCLUDED_TYPES = {
+    "staff_recruitment",
+    "administrative_notice",
+    "military_notice",
+}
+CLOSED_NOTICE_TITLE_KEYWORDS = {
+    "수상자 발표",
+    "합격자 발표",
+    "경기 결과",
+    "모집마감",
+}
+EMPTY_TARGET_TOKENS = {"및", "또는", "등", "해당", "가능", "-", "·"}
+ENROLLMENT_TYPE_LABELS = {
+    "freshman": "신입생",
+    "enrolled": "재학생",
+    "leave_of_absence": "휴학생",
+    "expected_graduate": "졸업예정자",
+    "graduate": "졸업생",
+    "graduate_student": "대학원생",
+    "all_students": "전체 학생",
+    "unknown": "",
+}
+CHILD_ONLY_KEYWORDS = {
+    "초등학생",
+    "중학생",
+    "고등학생",
+    "초·중·고",
+    "초중고",
+    "청소년",
+    "어린이",
+}
+STUDENT_OR_ADULT_KEYWORDS = {
+    "대학생",
+    "대학원생",
+    "재학생",
+    "휴학생",
+    "졸업생",
+    "청년",
+    "성인",
+    "일반인",
+    "전 국민",
+    "누구나",
+}
+APPLICATION_EVIDENCE_KEYWORDS = {
+    "모집",
+    "접수",
+    "신청",
+    "지원",
+    "제출",
+    "공모",
+    "응모",
+    "출품",
+    "마감",
+    "기한",
+    "서류",
+    "신고기간",
+    "연장기간",
+    "application",
+    "apply",
+    "deadline",
+    "close",
+}
+
+
+def is_child_only_notice(activity, structured):
+    """미성년 대상만 명시됐을 때 제외하고, 혼합 대상 공고는 보존한다."""
+    eligible = " ".join(structured.get("eligible_statuses") or [])
+    target_text = clean_text(f"{activity.get('target_raw') or ''} {eligible}")
+    has_child_target = any(keyword in target_text for keyword in CHILD_ONLY_KEYWORDS)
+    has_student_or_adult = any(
+        keyword in target_text for keyword in STUDENT_OR_ADULT_KEYWORDS
+    )
+    return has_child_target and not has_student_or_adult
 
 
 def _match_activities(student, activity_rows):
@@ -133,6 +274,16 @@ def _match_activities(student, activity_rows):
         activity["interest_categories"] = load_json(
             activity["interest_categories"], ["기타"]
         )
+        structured = load_json(activity.get("structured_data"), None)
+
+        if not structured_eligibility_matches(student, activity):
+            continue
+        if structured and structured.get("opportunity_type") in STRUCTURED_EXCLUDED_TYPES:
+            continue
+        if structured and is_child_only_notice(activity, structured):
+            continue
+        if any(keyword in activity["title"] for keyword in CLOSED_NOTICE_TITLE_KEYWORDS):
+            continue
 
         # 국제학생 전용 게시판은 국제학생으로 표시된 학생에게만 노출한다.
         if (
@@ -141,6 +292,9 @@ def _match_activities(student, activity_rows):
         ):
             continue
 
+        recommendation_group = (
+            structured.get("recommendation_group") if structured else None
+        )
         is_scholarship = activity["activity_category"] == "장학·지원"
         is_internship = activity["activity_category"] == "인턴·채용"
         is_internal = activity["campus_scope"] == "교내"
@@ -151,7 +305,12 @@ def _match_activities(student, activity_rows):
                 continue
 
         # 교내 프로그램은 관심분야를 보지 않는다(학과·지역만 본다). 교외는 기존대로 관심분야를 본다.
-        if not is_internal and not is_scholarship:
+        should_match_interest = (
+            recommendation_group == "personalized"
+            if recommendation_group
+            else not is_internal and not is_scholarship
+        )
+        if should_match_interest:
             if not interest_matches(
                 student["interest_categories"],
                 activity["interest_categories"],
@@ -175,6 +334,58 @@ def _match_activities(student, activity_rows):
     return results
 
 
+def _apply_personalization_scores(student, activities):
+    vector_activities = [
+        activity
+        for activity in activities
+        if activity.get("embedding_data")
+        and (load_json(activity.get("structured_data"), {}) or {}).get(
+            "recommendation_group"
+        )
+        == "personalized"
+    ]
+    if not vector_activities:
+        return activities
+    try:
+        student_vector = ensure_student_embedding(student)
+    except Exception as exc:
+        print(f"임베딩 점수 계산 생략: {exc}")
+        return activities
+
+    student_interests = set(student.get("interest_categories") or [])
+    preference = clean_text(student.get("preference_text") or "")
+    for activity in activities:
+        activity["recommendation_score"] = None
+        activity["recommendation_reason"] = ""
+        activity["eligibility_uncertain"] = False
+        if activity not in vector_activities:
+            structured = load_json(activity.get("structured_data"), {}) or {}
+            if structured.get("recommendation_group") == "eligibility_only":
+                activity["recommendation_reason"] = "추가 지원자격 확인이 필요해요"
+                activity["eligibility_uncertain"] = True
+            elif structured.get("recommendation_group") == "essential_notice":
+                activity["recommendation_reason"] = "학생에게 필요한 안내일 수 있어요"
+            continue
+
+        activity_vector = load_json(activity.get("embedding_data"), [])
+        similarity = max(0.0, min(1.0, cosine_similarity(student_vector, activity_vector)))
+        activity_interests = set(activity.get("interest_categories") or [])
+        overlap = student_interests & activity_interests
+        interest_score = 1.0 if overlap else (0.5 if not student_interests else 0.0)
+        score = 0.8 * similarity + 0.2 * interest_score
+        activity["recommendation_score"] = round(score * 100, 1)
+
+        if overlap:
+            activity["recommendation_reason"] = (
+                f"{', '.join(sorted(overlap)[:2])} 관심분야와 관련 있어요"
+            )
+        elif preference:
+            activity["recommendation_reason"] = "선호 활동 내용과 유사해요"
+        else:
+            activity["recommendation_reason"] = "전공·학년 정보와 관련된 활동이에요"
+    return activities
+
+
 def recommend_for_student(student_name):
     init_db()
     with sqlite3.connect(DB_NAME) as conn:
@@ -191,7 +402,8 @@ def recommend_for_student(student_name):
         ORDER BY reference_date DESC, id DESC
         """).fetchall()
 
-    return student, _match_activities(student, activity_rows)
+    matched = _match_activities(student, activity_rows)
+    return student, _apply_personalization_scores(student, matched)
 
 
 def get_student_by_id(student_id):
@@ -220,17 +432,92 @@ def recommend_for_student_id(student_id):
         ORDER BY reference_date DESC, id DESC
         """).fetchall()
 
-    return student, _match_activities(student, activity_rows)
+    matched = _match_activities(student, activity_rows)
+    return student, _apply_personalization_scores(student, matched)
 
 
 def _card_from_activity(activity):
+    structured = load_json(activity.get("structured_data"), None) or {}
     combined = clean_text(
         f"{activity.get('target_raw') or ''} "
         f"{activity.get('body_text') or ''} {activity.get('ocr_text') or ''}"
     )
-    deadline_date = extract_deadline_date(combined)
+    legacy_deadline = extract_deadline_date(combined)
+    direct_application_start = activity.get("application_start_date") or ""
+    direct_application_end = activity.get("application_end_date") or ""
+    has_separated_periods = "application_period_evidence" in structured
+    application_evidence = clean_text(
+        structured.get("application_period_evidence") or ""
+    ).lower()
+    trusted_application_period = bool(application_evidence) and any(
+        keyword in application_evidence
+        for keyword in APPLICATION_EVIDENCE_KEYWORDS
+    )
+    if has_separated_periods and trusted_application_period:
+        structured_start = structured.get("application_start_date") or ""
+        structured_deadline = structured.get("application_end_date") or ""
+    elif has_separated_periods:
+        structured_start = ""
+        structured_deadline = ""
+    else:
+        structured_start = structured.get("start_date") or ""
+        structured_deadline = structured.get("end_date") or ""
+
+    # 구조화 날짜가 기존 수집 기준일과 다른 연도라면 모델이 연도를 추정한 것으로 보고 쓰지 않는다.
+    reference_year = str(activity.get("reference_date") or "")[:4]
+    if structured_start and reference_year and structured_start[:4] != reference_year:
+        structured_start = ""
+    if structured_deadline and reference_year and structured_deadline[:4] != reference_year:
+        structured_deadline = ""
+
+    # 새 날짜 스키마가 있으면 기존 정규식 결과로 보충하지 않는다.
+    # 기존 정규식은 프로그램 진행기간을 모집기간으로 오인할 수 있기 때문이다.
+    deadline_date = direct_application_end or (
+        structured_deadline
+        if has_separated_periods
+        else structured_deadline or legacy_deadline
+    )
     dday = compute_dday(deadline_date)
     first_seen = (activity.get("first_seen_at") or "")[:10]
+    reference_date = (
+        direct_application_start
+        or structured_start
+        or activity.get("reference_date")
+        or ""
+    )
+    reference_age_days = None
+    try:
+        reference_age_days = (
+            today_kst() - datetime.strptime(reference_date, "%Y-%m-%d").date()
+        ).days
+    except (TypeError, ValueError):
+        pass
+    stale_without_deadline = (
+        not deadline_date
+        and reference_age_days is not None
+        and reference_age_days > 30
+    )
+    eligible_statuses = [
+        value.strip()
+        for value in (structured.get("eligible_statuses") or [])
+        if value
+        and value.strip() not in EMPTY_TARGET_TOKENS
+        and value.strip() not in ENROLLMENT_TYPE_LABELS
+    ]
+    structured_target = ", ".join(eligible_statuses)
+    eligibility_evidence = clean_text(structured.get("eligibility_evidence") or "")
+    if len(eligibility_evidence) > 180:
+        eligibility_evidence = ""
+    enrollment_target = ", ".join(
+        dict.fromkeys(
+            ENROLLMENT_TYPE_LABELS.get(value, "")
+            for value in (structured.get("eligible_enrollment_types") or [])
+            if ENROLLMENT_TYPE_LABELS.get(value, "")
+        )
+    )
+    legacy_target = clean_text(activity.get("target_raw") or "")
+    if legacy_target in EMPTY_TARGET_TOKENS:
+        legacy_target = ""
 
     # 지역 뱃지는 실제로 지역 조건이 적용되는 경우에만 보여준다(교내 장학·지원, 교외 전체).
     is_internal = activity["campus_scope"] == "교내"
@@ -241,12 +528,31 @@ def _card_from_activity(activity):
 
     return {
         **activity,
+        "target_raw": (
+            structured_target
+            or legacy_target
+            or eligibility_evidence
+            or enrollment_target
+        ),
         "target": load_json(activity.get("target"), []),
+        "reference_date": reference_date,
+        "date_basis": (
+            "링커리어 접수 시작일"
+            if direct_application_start
+            else "GPT 구조화 시작일"
+            if structured_start
+            else activity.get("date_basis")
+        ),
         "missing_before_ocr": load_json(activity.get("missing_before_ocr"), []),
         "deadline_date": deadline_date,
         "dday": dday,
         "is_new": first_seen == today_kst().isoformat(),
         "region_relevant": region_relevant,
+        "recommendation_score": activity.get("recommendation_score"),
+        "recommendation_reason": activity.get("recommendation_reason") or "",
+        "eligibility_uncertain": bool(activity.get("eligibility_uncertain")),
+        "reference_age_days": reference_age_days,
+        "stale_without_deadline": stale_without_deadline,
     }
 
 
@@ -266,6 +572,15 @@ def build_dashboard(student_id):
     student, matched = recommend_for_student_id(student_id)
 
     cards = [_card_from_activity(activity) for activity in matched]
+    cards.sort(
+        key=lambda card: (
+            not card["stale_without_deadline"],
+            card["recommendation_score"] is not None,
+            card["recommendation_score"] or 0,
+            card["reference_date"],
+        ),
+        reverse=True,
+    )
     # 마감일이 확인되고 이미 지난 공고는 개인화 화면에서 제외한다(DB 원본은 그대로 둔다).
     cards = [card for card in cards if not (card["dday"] is not None and card["dday"] < 0)]
 
@@ -276,8 +591,8 @@ def build_dashboard(student_id):
     external_urgent, external_rest = _split_urgent(external_cards)
 
     kw_external_cards = [card for card in external_rest if card["source"] == "광운대학교"]
-    # 링커리어는 notice.md 스펙대로 최대 6개만 노출한다.
-    linkareer_cards = [card for card in external_rest if card["source"] == "링커리어"][:6]
+    # 출처·카테고리 하위 탭에서 탐색하므로 조건을 통과한 링커리어 공고를 모두 제공한다.
+    linkareer_cards = [card for card in external_rest if card["source"] == "링커리어"]
 
     return {
         "student": student,

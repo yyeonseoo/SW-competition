@@ -21,6 +21,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
   const [interests, setInterests] = useState<string[]>(student.interest_categories);
   const [notifyOptIn, setNotifyOptIn] = useState(student.notify_opt_in === 1);
   const [isInternational, setIsInternational] = useState(student.is_international === 1);
+  const [preferenceText, setPreferenceText] = useState(student.preference_text || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +45,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
         interest_categories: interests,
         notify_opt_in: notifyOptIn ? 1 : 0,
         is_international: isInternational ? 1 : 0,
+        preference_text: preferenceText,
       });
       onSaved(updated);
     } catch (err) {
@@ -167,6 +169,17 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
                 </span>
               ))}
             </div>
+          </div>
+
+          <div className="section-subtitle">선호하는 활동 유형</div>
+          <div className="field">
+            <textarea
+              className="input preference-input"
+              value={preferenceText}
+              maxLength={500}
+              onChange={(e) => setPreferenceText(e.target.value)}
+              placeholder="예: AI 프로젝트와 해커톤으로 포트폴리오를 만들고 싶어요."
+            />
           </div>
 
           <div className="section-subtitle">알림</div>

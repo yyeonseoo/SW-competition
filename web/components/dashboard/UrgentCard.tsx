@@ -31,7 +31,12 @@ export default function UrgentCard({ card }: Props) {
       </div>
       <h4>{card.title}</h4>
       <div className="meta">
-        {card.source} · 마감 {card.deadline_date} · 등록 {card.reference_date}
+        {card.source} · 마감 {card.deadline_date} ·{" "}
+        {card.date_basis === "GPT 구조화 시작일" ||
+        card.date_basis === "링커리어 접수 시작일"
+          ? "모집 시작"
+          : "등록"}{" "}
+        {card.reference_date}
       </div>
     </div>
   );

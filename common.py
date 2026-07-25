@@ -87,7 +87,7 @@ NOISE_KEYWORDS = [
     "수업계획서", "강의평가", "시간표", "이수 체계도 안내",
     # 시설/서비스 안내 (청소/승강기는 board_category="시설" 통째 제외로 대체 — 아래 참고)
     "복구안내", "중단안내", "서비스복구", "정전", "점검안내", "주차안내", "도서관안내",
-    "장소사용", "초빙"
+    "장소사용", "초빙",
     # 기타 행정
     "상해보험", "단체교섭", "병무", "현역병모집",
     "수상자 발표", "부고", "행복기숙사(빛솔재)", "사무실 이전", "사칭 물품", "셔틀버스", "장소 사용"
@@ -323,6 +323,8 @@ def init_db():
             target_raw TEXT,
             reference_date TEXT NOT NULL,
             date_basis TEXT NOT NULL,
+            application_start_date TEXT,
+            application_end_date TEXT,
             body_text TEXT,
             ocr_text TEXT,
             ocr_used INTEGER DEFAULT 0,
@@ -339,6 +341,29 @@ def init_db():
         }
         if "campus_scope" not in existing_columns:
             conn.execute("ALTER TABLE activities ADD COLUMN campus_scope TEXT")
+
+        # GPT 구조화 결과를 공고 본문 해시와 함께 캐시한다.
+        # 같은 내용은 다시 API를 호출하지 않고, 내용이 바뀐 공고만 재분석한다.
+        structure_columns = {
+            "content_hash": "TEXT",
+            "structured_data": "TEXT",
+            "structure_status": "TEXT",
+            "structure_confidence": "REAL",
+            "structured_at": "TEXT",
+            "structure_model": "TEXT",
+            "structure_error": "TEXT",
+            "application_start_date": "TEXT",
+            "application_end_date": "TEXT",
+            "recommendation_text": "TEXT",
+            "embedding_data": "TEXT",
+            "embedding_hash": "TEXT",
+            "embedding_model": "TEXT",
+        }
+        for column_name, column_type in structure_columns.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE activities ADD COLUMN {column_name} {column_type}"
+                )
 
         # ALTER TABLE은 기존 행을 채워주지 않으므로, 비어있는 campus_scope를 계산해 백필한다.
         null_scope_rows = conn.execute(
@@ -361,7 +386,11 @@ def init_db():
             region_sigungu TEXT,
             email TEXT,
             notify_opt_in INTEGER DEFAULT 1,
-            is_international INTEGER DEFAULT 0
+            is_international INTEGER DEFAULT 0,
+            preference_text TEXT DEFAULT '',
+            embedding_data TEXT,
+            embedding_hash TEXT,
+            embedding_model TEXT
         )
         """)
 
@@ -379,6 +408,16 @@ def init_db():
             conn.execute(
                 "ALTER TABLE students ADD COLUMN is_international INTEGER DEFAULT 0"
             )
+        for column_name, column_type in {
+            "preference_text": "TEXT DEFAULT ''",
+            "embedding_data": "TEXT",
+            "embedding_hash": "TEXT",
+            "embedding_model": "TEXT",
+        }.items():
+            if column_name not in student_columns:
+                conn.execute(
+                    f"ALTER TABLE students ADD COLUMN {column_name} {column_type}"
+                )
 
 
 def create_student(
@@ -390,6 +429,7 @@ def create_student(
     email=None,
     notify_opt_in=1,
     is_international=0,
+    preference_text="",
     name=None,
 ):
     """프로필 온보딩에서 학생을 새로 등록한다. 프로토타입 온보딩 화면에는 이름 입력이
@@ -400,8 +440,9 @@ def create_student(
             """
             INSERT INTO students (
                 name, department, grade, interest_categories,
-                region_sido, region_sigungu, email, notify_opt_in, is_international
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                region_sido, region_sigungu, email, notify_opt_in, is_international,
+                preference_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -413,6 +454,7 @@ def create_student(
                 email,
                 notify_opt_in,
                 is_international,
+                preference_text,
             ),
         )
         return cursor.lastrowid
@@ -434,6 +476,8 @@ def save_activity(item):
             "target": json.dumps(item["target"], ensure_ascii=False),
             "missing_before_ocr": json.dumps(item.get("missing_before_ocr", []), ensure_ascii=False),
         }
+        serialized.setdefault("application_start_date", "")
+        serialized.setdefault("application_end_date", "")
 
         if existing is None:
             conn.execute("""
@@ -441,12 +485,14 @@ def save_activity(item):
                 source, source_section, campus_scope, title, url, activity_category,
                 interest_categories, region_sido, region_sigungu, region_detail,
                 region_status, target, target_raw, reference_date, date_basis, body_text,
+                application_start_date, application_end_date,
                 ocr_text, ocr_used, missing_before_ocr, review_required,
                 first_seen_at, last_seen_at
             ) VALUES (
                 :source, :source_section, :campus_scope, :title, :url, :activity_category,
                 :interest_categories, :region_sido, :region_sigungu, :region_detail,
                 :region_status, :target, :target_raw, :reference_date, :date_basis, :body_text,
+                :application_start_date, :application_end_date,
                 :ocr_text, :ocr_used, :missing_before_ocr, :review_required,
                 :first_seen_at, :last_seen_at
             )
@@ -469,6 +515,8 @@ def save_activity(item):
             target_raw=:target_raw,
             reference_date=:reference_date,
             date_basis=:date_basis,
+            application_start_date=:application_start_date,
+            application_end_date=:application_end_date,
             body_text=:body_text,
             ocr_text=:ocr_text,
             ocr_used=:ocr_used,

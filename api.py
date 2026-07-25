@@ -39,6 +39,7 @@ class StudentIn(BaseModel):
     email: Optional[str] = None
     notify_opt_in: int = 1
     is_international: int = 0
+    preference_text: str = Field(default="", max_length=500)
 
 
 class StudentPatch(BaseModel):
@@ -50,6 +51,7 @@ class StudentPatch(BaseModel):
     email: Optional[str] = None
     notify_opt_in: Optional[int] = None
     is_international: Optional[int] = None
+    preference_text: Optional[str] = Field(default=None, max_length=500)
 
 
 def _student_response(student_id):
@@ -79,6 +81,7 @@ def post_student(body: StudentIn):
         email=body.email,
         notify_opt_in=body.notify_opt_in,
         is_international=body.is_international,
+        preference_text=body.preference_text,
     )
     return _student_response(student_id)
 
@@ -100,6 +103,13 @@ def patch_student(student_id: int, body: StudentPatch):
         updates["interest_categories"] = json.dumps(
             updates["interest_categories"], ensure_ascii=False
         )
+    if any(
+        key in updates
+        for key in ("department", "grade", "interest_categories", "preference_text")
+    ):
+        updates["embedding_data"] = None
+        updates["embedding_hash"] = None
+        updates["embedding_model"] = None
 
     with sqlite3.connect(DB_NAME) as conn:
         existing = conn.execute(

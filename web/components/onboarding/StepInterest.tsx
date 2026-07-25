@@ -8,6 +8,8 @@ interface Props {
   onToggleNotify: () => void;
   email: string;
   onChangeEmail: (v: string) => void;
+  preferenceText: string;
+  onChangePreferenceText: (v: string) => void;
 }
 
 export default function StepInterest({
@@ -18,6 +20,8 @@ export default function StepInterest({
   onToggleNotify,
   email,
   onChangeEmail,
+  preferenceText,
+  onChangePreferenceText,
 }: Props) {
   return (
     <>
@@ -38,6 +42,20 @@ export default function StepInterest({
         </div>
         <div className="hint">
           {selected.length}개 선택됨 · 언제든 프로필에서 변경 가능
+        </div>
+      </div>
+
+      <div className="section-subtitle">선호하는 활동 유형 (선택)</div>
+      <div className="field">
+        <textarea
+          className="input preference-input"
+          value={preferenceText}
+          maxLength={500}
+          onChange={(e) => onChangePreferenceText(e.target.value)}
+          placeholder="예: AI 프로젝트나 해커톤에 참여해서 실무 경험과 포트폴리오를 쌓고 싶어요."
+        />
+        <div className="hint">
+          자연어로 적어주면 공고 내용과 의미가 비슷한 활동을 먼저 추천해요.
         </div>
       </div>
 

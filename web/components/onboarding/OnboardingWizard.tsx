@@ -28,6 +28,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [notifyOptIn, setNotifyOptIn] = useState(true);
   const [email, setEmail] = useState("");
   const [isInternational, setIsInternational] = useState(false);
+  const [preferenceText, setPreferenceText] = useState("");
 
   useEffect(() => {
     getMeta()
@@ -54,6 +55,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
         email: email || null,
         notify_opt_in: notifyOptIn ? 1 : 0,
         is_international: isInternational ? 1 : 0,
+        preference_text: preferenceText,
       });
       setStoredStudentId(student.id);
       onComplete(student.id);
@@ -156,6 +158,8 @@ export default function OnboardingWizard({ onComplete }: Props) {
                 onToggleNotify={() => setNotifyOptIn((v) => !v)}
                 email={email}
                 onChangeEmail={setEmail}
+                preferenceText={preferenceText}
+                onChangePreferenceText={setPreferenceText}
               />
             ) : (
               <p className="lead">관심분야 목록을 불러오는 중...</p>

@@ -6,3 +6,4 @@ selenium
 pandas
 fastapi
 uvicorn[standard]
+openai>=2.48.0,<3

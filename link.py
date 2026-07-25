@@ -19,11 +19,13 @@ from common import (
     INTEREST_CATEGORIES,
     classify_interest_categories,
     clean_text,
+    extract_deadline_date,
     init_db,
     is_recent_upload,
     normalize_date,
     normalize_target,
     save_activity,
+    today_kst,
 )
 
 
@@ -43,7 +45,7 @@ ALLOWED_TARGETS = {
 }
 
 SCROLL_COUNT = 2
-MAX_DETAILS_PER_SECTION = 10
+MAX_DETAILS_PER_SECTION = 15
 REQUEST_DELAY = 1.0
 
 
@@ -485,6 +487,25 @@ def extract_start_date(summary_text):
     return ""
 
 
+def extract_application_deadline(summary_text):
+    """링커리어 상단의 '접수기간' 블록 안에서만 마감일을 읽는다.
+
+    뒤에 이어지는 '활동기간 시작일/마감일'과 섞이지 않도록 접수기간부터
+    활동기간 직전까지만 검색한다.
+    """
+    start = summary_text.find("접수기간")
+    if start == -1:
+        return ""
+    end = summary_text.find("활동기간", start)
+    segment = summary_text[start:end if end != -1 else len(summary_text)]
+    match = re.search(
+        r"마감일\s*[:：\-]?\s*(\d{4}[-./년]\s*\d{1,2}[-./월]\s*\d{1,2})",
+        segment,
+        flags=re.IGNORECASE,
+    )
+    return normalize_date(match.group(1)) if match else ""
+
+
 def normalize_linkareer_target(raw_target):
     """
     링커리어 상단 참여대상을 표준값으로 정리한다.
@@ -692,6 +713,7 @@ def parse_detail(driver, seed):
     start_date = extract_start_date(
         summary_text
     )
+    deadline_date = extract_application_deadline(summary_text)
 
     target_raw = extract_linkareer_target(
         activity_category,
@@ -734,9 +756,14 @@ def parse_detail(driver, seed):
             target_raw
         ),
         "target_raw": target_raw,
-        "reference_date": start_date,
-        "date_basis": "시작일",
-        "body_text": detail_text[:15000],
+        "reference_date": start_date or deadline_date,
+        "date_basis": "시작일" if start_date else "마감일",
+        "application_start_date": start_date,
+        "application_end_date": deadline_date,
+        "deadline_date": deadline_date,
+        "body_text": clean_text(
+            f"[링커리어 상단 정보] {summary_text} [상세내용] {detail_text}"
+        )[:15000],
         "ocr_text": "",
         "ocr_used": 0,
         "missing_before_ocr": [],
@@ -842,12 +869,16 @@ def main():
                     )
                     continue
 
-                if not is_recent_upload(
-                    item["reference_date"]
-                ):
+                deadline_date = item.get("deadline_date") or ""
+                is_active = (
+                    deadline_date >= today_kst().isoformat()
+                    if deadline_date
+                    else is_recent_upload(item["reference_date"], days_back=14)
+                )
+                if not is_active:
                     old_count += 1
                     print(
-                        "  → 기간 제외(시작일): "
+                        "  → 기간 제외(기준일): "
                         f"{item['reference_date']}"
                     )
                     continue

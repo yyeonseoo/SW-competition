@@ -30,11 +30,11 @@ LIST_URL_TEMPLATE = (
     "?srCategoryId=&mode=list&searchKey=1&searchVal=&tpage={page}"
 )
 SOURCE = "광운대학교"
-MAX_PAGES = 20
+MAX_PAGES = 10
 REQUEST_DELAY = 1.0
 # 링커리어(link.py)는 팀원 규칙대로 최근 3일(is_recent_upload 기본값)을 유지하고,
 # 광운대 공지는 게시물이 뜸해서 30일(한 달)로 넓힌다.
-KW_DAYS_BACK = 15
+KW_DAYS_BACK = 7
 
 HEADERS = {
     "User-Agent": (

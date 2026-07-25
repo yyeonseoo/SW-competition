@@ -32,6 +32,18 @@ export default function ActivityCard({ card }: Props) {
         {card.is_new && <span className="badge new">NEW</span>}
       </div>
       <h4>{card.title}</h4>
+      {card.recommendation_reason && (
+        <div
+          className={`recommendation-reason${
+            card.eligibility_uncertain ? " uncertain" : ""
+          }`}
+        >
+          {card.eligibility_uncertain ? "⚠️" : "✨"} {card.recommendation_reason}
+          {card.recommendation_score !== null && (
+            <span>{Math.round(card.recommendation_score)}점</span>
+          )}
+        </div>
+      )}
       <div className="meta">
         <span>
           <b>{card.source}</b>
@@ -39,7 +51,13 @@ export default function ActivityCard({ card }: Props) {
         <span>
           {card.deadline_date ? `모집 ~ ${card.deadline_date}` : "모집기간 확인 필요"}
         </span>
-        <span>등록 {card.reference_date}</span>
+        <span>
+          {card.date_basis === "GPT 구조화 시작일" ||
+          card.date_basis === "링커리어 접수 시작일"
+            ? "모집 시작"
+            : "등록"}{" "}
+          {card.reference_date}
+        </span>
       </div>
       <div className="footer">
         <div className="target">모집대상 : {card.target_raw || "확인 필요"}</div>

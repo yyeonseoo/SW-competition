@@ -17,6 +17,10 @@ common.py             공통 유틸: DB 스키마/저장, 활동카테고리·�
 regions.py             제목·본문에서 시·도 → 구/시·군 2단계 지역 추출 (동명 지명 모호성 처리)
 departments.py         web/data/departments.json(단일 소스)을 읽어 단과대학→학과 조회 함수 제공(college_of 등)
 ocr_utils.py           NCP CLOVA OCR 연동 (본문에 모집대상·기간이 없을 때만 호출)
+notice_structurer.py   OpenAI Structured Outputs로 공고 유형·자격·기간을 JSON 구조화
+analyze_notices.py     새 공고만 구조화하는 비용 제한 CLI (본문 해시 캐시)
+build_embeddings.py    개인화 대상 공고의 문장 임베딩 생성·캐시
+embedding_utils.py     학생/공고 추천 문장 생성, 임베딩 호출, 코사인 유사도
 recommend.py           학생 프로필과 공고를 매칭해 추천 목록 생성 (CLI) + API가 쓰는 build_dashboard()
 insert_student.py      학생 프로필 등록 dev 스크립트 (테스트용 단일 학생 하드코딩, 웹 앱은 미사용)
 check_db.py            recommendation.db 저장 내용 확인용 스크립트
@@ -59,17 +63,31 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-OCR 자격 증명 설정 (광운대 공지 수집 시 필요):
+OCR/OpenAI 자격 증명 설정:
 ```
 cp .env.example .env
-# .env에 CLOVA_OCR_URL, CLOVA_OCR_SECRET 입력
+# .env에 CLOVA_OCR_URL, CLOVA_OCR_SECRET, OPENAI_API_KEY 입력
+# OPENAI_MODEL=gpt-5.4-nano
 ```
 
 공고 수집:
 ```
-python link.py        # 링커리어 (대외활동/공모전/교육, 시작일 최근 3일 + 참여대상 필터)
-python kw_notice.py    # 광운대학교 공지사항 (최근 3일 작성글)
+python link.py         # 링커리어 (카테고리별 최대 15개, 모집 중 우선)
+python kw_notice.py    # 광운대학교 공지사항 (최근 7일, 최대 10페이지)
+python analyze_notices.py --dry-run       # 과금 없이 다음 구조화 대상 확인
+python analyze_notices.py                 # 새/변경 공고만 최대 20개 구조화
+python analyze_notices.py --limit 5       # 이번 실행 호출 상한을 5개로 축소
+python build_embeddings.py                # 새/변경된 개인화 공고 임베딩 생성
 ```
+
+`analyze_notices.py`는 공고 내용의 SHA-256 해시와 구조화 결과를 DB에 저장한다. 같은 내용은 다시
+호출하지 않으며 실패한 공고만 다음 실행에서 재시도한다. `--force`는 캐시를 무시해 비용이 다시
+발생하므로 결과 형식을 바꿔 재분석할 때만 사용한다. API 키가 없는 팀원은 수집·추천·웹 실행만 하고,
+키 담당자 한 명만 구조화 명령을 실행하는 방식을 권장한다.
+
+`build_embeddings.py`는 `text-embedding-3-small`을 사용하며 공고 제목·GPT 요약·주제·필요 역량을
+합친 추천 문장의 해시를 캐시한다. 같은 공고는 다시 호출하지 않는다. 학생 임베딩은 전공·학년·관심분야·
+선호 활동 문장으로 만들며 프로필이 바뀐 경우에만 대시보드 최초 요청에서 갱신한다.
 
 API 서버 실행 (프론트엔드가 여길 바라봄):
 ```

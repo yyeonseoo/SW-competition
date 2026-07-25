@@ -9,6 +9,7 @@ export interface Student {
   email: string | null;
   notify_opt_in: number;
   is_international: number;
+  preference_text: string;
 }
 
 export interface ActivityCard {
@@ -36,6 +37,11 @@ export interface ActivityCard {
   dday: number | null;
   is_new: boolean;
   region_relevant: boolean;
+  recommendation_score: number | null;
+  recommendation_reason: string;
+  eligibility_uncertain: boolean;
+  reference_age_days: number | null;
+  stale_without_deadline: boolean;
 }
 
 export interface DashboardResponse {
@@ -69,4 +75,5 @@ export interface StudentInput {
   email?: string | null;
   notify_opt_in?: number;
   is_international?: number;
+  preference_text?: string;
 }
