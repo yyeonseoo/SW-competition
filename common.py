@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -67,6 +68,11 @@ NEXT_LABELS = [
     "문의사항", "문의처", "문의", "장소", "일정", "모집인원",
 ]
 
+DATE_PATTERN = r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})"
+
+DEADLINE_LABELS = ["마감일", "마감기한", "접수마감", "신청마감", "모집마감", "제출마감"]
+PERIOD_LABELS = ["접수기간", "신청기간", "모집기간", "지원기간", "공고기간", "활동기간"]
+
 CATEGORY_RULES = {
     "공모전": [
         "공모전", "경진대회", "해커톤", "아이디어대회", "아이디어 대회",
@@ -108,10 +114,7 @@ def now_kst_string():
 
 
 def normalize_date(text):
-    match = re.search(
-        r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})",
-        text or "",
-    )
+    match = re.search(DATE_PATTERN, text or "")
     if not match:
         return ""
     year, month, day = map(int, match.groups())
@@ -127,6 +130,54 @@ def is_recent_upload(uploaded_date, days_back=3):
         return False
     date_value = datetime.strptime(value, "%Y-%m-%d").date()
     return today_kst() - timedelta(days=days_back) <= date_value <= today_kst()
+
+
+def extract_deadline_date(text):
+    """본문/모집대상 텍스트에서 마감일(종료일)을 최선 노력으로 추출한다.
+    라벨을 못 찾거나 날짜 형식이 불명확하면 빈 문자열을 반환한다(추출 실패는 정상 케이스)."""
+    text = clean_text(text)
+    if not text:
+        return ""
+
+    for label in DEADLINE_LABELS:
+        pos = text.find(label)
+        if pos == -1:
+            continue
+        value = normalize_date(text[pos:pos + 60])
+        if value:
+            return value
+
+    stop_labels = NEXT_LABELS + DEADLINE_LABELS
+    for label in PERIOD_LABELS:
+        pos = text.find(label)
+        if pos == -1:
+            continue
+        end = len(text)
+        for stop in stop_labels:
+            stop_pos = text.find(stop, pos + len(label))
+            if stop_pos != -1:
+                end = min(end, stop_pos)
+
+        dates = re.findall(DATE_PATTERN, text[pos:end])
+        if dates:
+            year, month, day = map(int, dates[-1])
+            try:
+                return datetime(year, month, day).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
+    return ""
+
+
+def compute_dday(date_str):
+    """date_str("YYYY-MM-DD")이 오늘 기준 며칠 남았는지 반환한다. 파싱 불가하면 None."""
+    if not date_str:
+        return None
+    try:
+        date_value = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return (date_value - today_kst()).days
 
 
 def classify_activity_category(text, forced_category=None):
@@ -238,6 +289,16 @@ def init_db():
         if "campus_scope" not in existing_columns:
             conn.execute("ALTER TABLE activities ADD COLUMN campus_scope TEXT")
 
+        # ALTER TABLE은 기존 행을 채워주지 않으므로, 비어있는 campus_scope를 계산해 백필한다.
+        null_scope_rows = conn.execute(
+            "SELECT id, source, source_section FROM activities WHERE campus_scope IS NULL"
+        ).fetchall()
+        for row_id, source, source_section in null_scope_rows:
+            conn.execute(
+                "UPDATE activities SET campus_scope = ? WHERE id = ?",
+                (classify_campus_scope(source, source_section or ""), row_id),
+            )
+
         conn.execute("""
         CREATE TABLE IF NOT EXISTS students (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,9 +307,57 @@ def init_db():
             grade INTEGER NOT NULL CHECK(grade BETWEEN 1 AND 4),
             interest_categories TEXT NOT NULL,
             region_sido TEXT NOT NULL,
-            region_sigungu TEXT
+            region_sigungu TEXT,
+            email TEXT,
+            notify_opt_in INTEGER DEFAULT 1
         )
         """)
+
+        # email/notify_opt_in은 기존 DB에 없을 수 있으므로 안전하게 추가한다.
+        student_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(students)")
+        }
+        if "email" not in student_columns:
+            conn.execute("ALTER TABLE students ADD COLUMN email TEXT")
+        if "notify_opt_in" not in student_columns:
+            conn.execute(
+                "ALTER TABLE students ADD COLUMN notify_opt_in INTEGER DEFAULT 1"
+            )
+
+
+def create_student(
+    department,
+    grade,
+    interest_categories,
+    region_sido,
+    region_sigungu="",
+    email=None,
+    notify_opt_in=1,
+    name=None,
+):
+    """프로필 온보딩에서 학생을 새로 등록한다. 프로토타입 온보딩 화면에는 이름 입력이
+    없으므로, name을 안 주면 화면에 노출되지 않는 내부용 placeholder를 생성한다."""
+    name = name or f"guest-{uuid.uuid4().hex[:8]}"
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO students (
+                name, department, grade, interest_categories,
+                region_sido, region_sigungu, email, notify_opt_in
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                department,
+                grade,
+                json.dumps(interest_categories, ensure_ascii=False),
+                region_sido,
+                region_sigungu,
+                email,
+                notify_opt_in,
+            ),
+        )
+        return cursor.lastrowid
 
 
 def save_activity(item):
