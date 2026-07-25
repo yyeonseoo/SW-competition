@@ -10,6 +10,19 @@ from common import (
     init_db,
     today_kst,
 )
+from departments import COLLEGES, all_departments, college_of
+
+# 긴 이름부터 찾아 부분 문자열 충돌을 줄인다(regions.py의 지역 매칭과 같은 방식).
+_ALL_DEPARTMENTS = sorted(all_departments(), key=len, reverse=True)
+_ALL_COLLEGES = sorted(COLLEGES.keys(), key=len, reverse=True)
+
+
+def _find_known_names(text, candidates):
+    return [
+        name
+        for name in candidates
+        if re.search(rf"(?<![가-힣]){re.escape(name)}(?![가-힣])", text)
+    ]
 
 
 def load_json(value, default):
@@ -49,23 +62,24 @@ def grade_matches(grade, target_raw):
 
 
 def department_matches(department, target_raw):
+    """공고 텍스트에 실제 존재하는(departments.py 기준) 학과·단과대학 이름이 언급된 경우에만
+    지원자격 제한으로 간주한다. 이름이 안 겹치는 임의의 '~학과/학부/전공' 문구(예: 담당부서 표기)에
+    낚이지 않도록, 광운대 실제 학과/단과대학 전체 목록과 정확히 대조한다."""
     text = clean_text(target_raw)
     if not text:
         return True
 
-    major_terms = re.findall(
-        r"([가-힣A-Za-z0-9·/\s]{2,35}(?:학과|학부|전공))",
-        text,
-    )
-    if not major_terms:
+    mentioned_departments = _find_known_names(text, _ALL_DEPARTMENTS)
+    mentioned_colleges = _find_known_names(text, _ALL_COLLEGES)
+
+    if not mentioned_departments and not mentioned_colleges:
         return True
 
-    department_compact = re.sub(r"\s+", "", department)
-    return any(
-        department_compact in re.sub(r"\s+", "", term)
-        or re.sub(r"\s+", "", term) in department_compact
-        for term in major_terms
-    )
+    if department in mentioned_departments:
+        return True
+
+    student_college = college_of(department)
+    return bool(student_college and student_college in mentioned_colleges)
 
 
 def region_matches(student, activity):

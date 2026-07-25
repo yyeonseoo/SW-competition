@@ -15,6 +15,7 @@ kw_notice.py          광운대학교 공지사항 수집 (requests + BeautifulS
 common.py             공통 유틸: DB 스키마/저장, 활동카테고리·관심분야·교내외 구분 분류,
                        마감일 추출·D-day, 학생 생성, 날짜/대상 정규화
 regions.py             제목·본문에서 시·도 → 구/시·군 2단계 지역 추출 (동명 지명 모호성 처리)
+departments.py         web/data/departments.json(단일 소스)을 읽어 단과대학→학과 조회 함수 제공(college_of 등)
 ocr_utils.py           NCP CLOVA OCR 연동 (본문에 모집대상·기간이 없을 때만 호출)
 recommend.py           학생 프로필과 공고를 매칭해 추천 목록 생성 (CLI) + API가 쓰는 build_dashboard()
 insert_student.py      학생 프로필 등록 dev 스크립트 (테스트용 단일 학생 하드코딩, 웹 앱은 미사용)
@@ -119,9 +120,18 @@ SQLite (`recommendation.db`), 테이블 2개:
 지역 규칙 게이트는 `recommend.should_apply_region_filter(activity)` 한 곳에서 판정한다 —
 교내 일반 활동만 지역 무관, 그 외(교내 장학·지원, 교외 전체)는 기존 `region_matches()`를 적용.
 
-`department_matches`/`region_matches`(정밀 전공·지역 매칭)는 지금은 단순 로직이며, 실제 학과·지역
-매핑으로 교체될 자리로 그대로 남아 있다 — 학과 온보딩 옵션도 `web/data/departments.ts`에 플레이스홀더로만
-채워져 있다(실제 광운대 단과대학/학과 전체 목록 아님).
+`region_matches`(정밀 지역 매칭)는 지금은 단순 로직이며 개선 여지가 남아 있다.
+
+학과 데이터의 단일 소스는 `web/data/departments.json`(실제 광운대 8개 단과대학·35개 학과)이다.
+프론트엔드는 `web/data/departments.ts`가 이 JSON을 직접 import해서 쓰고, 백엔드는 `departments.py`가
+같은 JSON 파일을 읽어(`web/data/departments.json`, 상대경로 아님 — `Path(__file__)` 기준이라 실행
+위치와 무관) 동일한 조회 함수(`COLLEGES`/`all_departments`/`college_of`)를 제공한다. 학과 목록을
+바꿀 땐 그 JSON 하나만 고치면 양쪽에 반영된다. `recommend.py::department_matches`는
+공고 `target_raw`에 이 실제 학과/단과대학 이름이 문자 그대로 등장할 때만 지원자격 제한으로 인정하고,
+학과명이 아니라 단과대학명만 언급된 경우 `departments.college_of(department)`로 학생의 소속 단과대학을
+구해 비교한다(실제로 존재하지 않는 "~학과" 문구에 낚이지 않도록). 온보딩/프로필 편집 화면의 단과대학→학과
+선택도 이 목록으로 실제 cascading된다. 다만 학생 프로필에는 여전히 `department`(학과)만 저장하고
+단과대학 자체는 저장하지 않는다.
 
 ## 마감일 / 곧 마감 / 조기마감 처리
 
@@ -154,6 +164,13 @@ SQLite (`recommendation.db`), 테이블 2개:
   `장학·지원`으로 강제 매핑.
 - 2026-07-25: `activities` 테이블에 `campus_scope`(교내/교외) 컬럼 추가(+기존 22건 백필).
 - 2026-07-25: `requirements.txt`에 `selenium`, `pandas`, `fastapi`, `uvicorn` 추가. `README.txt` → `README.md`.
+- 2026-07-25: 링커리어 크롤링은 Selenium 유지로 확정(전환 안 함).
+- 2026-07-25: `departments.py`(백엔드) 추가, `recommend.py::department_matches`가 광운대 실제
+  학과/단과대학 이름만 신뢰하도록 강화(느슨한 정규식 기반 substring 매칭 제거).
+- 2026-07-25: `departments.py`가 자체 하드코딩 대신 `web/data/departments.json`을 읽도록 변경 —
+  학과 데이터 단일 소스화(프론트·백엔드 모두 같은 JSON을 봄).
+- 2026-07-25: `web/data/departments.json`(실제 광운대 단과대학·학과 목록)으로 온보딩/프로필 편집의
+  단과대학→학과 선택을 실제 cascading으로 교체.
 
 ## 미구현 (계획 단계)
 

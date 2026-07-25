@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { COLLEGES, DEPARTMENTS } from "@/data/departments";
+import { DEFAULT_COLLEGE, DEFAULT_DEPARTMENT, getDepartments } from "@/data/departments";
 import { createStudent, getMeta } from "@/lib/api";
 import { setStoredStudentId } from "@/lib/studentId";
 import type { MetaResponse } from "@/lib/types";
@@ -19,8 +19,8 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [college, setCollege] = useState(COLLEGES[0]);
-  const [department, setDepartment] = useState(DEPARTMENTS[0]);
+  const [college, setCollege] = useState(DEFAULT_COLLEGE);
+  const [department, setDepartment] = useState(DEFAULT_DEPARTMENT);
   const [grade, setGrade] = useState(3);
   const [sido, setSido] = useState("");
   const [sigungu, setSigungu] = useState("");
@@ -84,7 +84,10 @@ export default function OnboardingWizard({ onComplete }: Props) {
               college={college}
               department={department}
               grade={grade}
-              onChangeCollege={setCollege}
+              onChangeCollege={(v) => {
+                setCollege(v);
+                setDepartment(getDepartments(v)[0] ?? "");
+              }}
               onChangeDepartment={setDepartment}
               onChangeGrade={setGrade}
             />

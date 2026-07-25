@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { COLLEGES, DEPARTMENTS } from "@/data/departments";
+import { COLLEGES, findCollegeForDepartment, getDepartments } from "@/data/departments";
 import { patchStudent } from "@/lib/api";
 import type { MetaResponse, Student } from "@/lib/types";
 
@@ -13,7 +13,7 @@ interface Props {
 }
 
 export default function ProfileEditModal({ student, meta, onClose, onSaved }: Props) {
-  const [college, setCollege] = useState(COLLEGES[0]);
+  const [college, setCollege] = useState(() => findCollegeForDepartment(student.department));
   const [department, setDepartment] = useState(student.department);
   const [grade, setGrade] = useState(student.grade);
   const [sido, setSido] = useState(student.region_sido);
@@ -70,10 +70,18 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
           </div>
           <div className="field">
             <div className="row">
-              <select className="select" value={college} onChange={(e) => setCollege(e.target.value)}>
-                {COLLEGES.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+              <select
+                className="select"
+                value={college}
+                onChange={(e) => {
+                  const newCollege = e.target.value;
+                  setCollege(newCollege);
+                  setDepartment(getDepartments(newCollege)[0] ?? "");
+                }}
+              >
+                {COLLEGES.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
                   </option>
                 ))}
               </select>
@@ -82,7 +90,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
               >
-                {DEPARTMENTS.map((name) => (
+                {getDepartments(college).map((name) => (
                   <option key={name} value={name}>
                     {name}
                   </option>

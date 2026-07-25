@@ -1,6 +1,6 @@
 "use client";
 
-import { COLLEGES, DEPARTMENTS } from "@/data/departments";
+import { COLLEGES, getDepartments } from "@/data/departments";
 
 interface Props {
   college: string;
@@ -31,9 +31,9 @@ export default function StepMajor({
           value={college}
           onChange={(e) => onChangeCollege(e.target.value)}
         >
-          {COLLEGES.map((name) => (
-            <option key={name} value={name}>
-              {name}
+          {COLLEGES.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
             </option>
           ))}
         </select>
@@ -45,7 +45,7 @@ export default function StepMajor({
           value={department}
           onChange={(e) => onChangeDepartment(e.target.value)}
         >
-          {DEPARTMENTS.map((name) => (
+          {getDepartments(college).map((name) => (
             <option key={name} value={name}>
               {name}
             </option>
