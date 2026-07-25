@@ -265,32 +265,46 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 .card-urgent {
   background: #fff; border: 1.5px solid var(--kw); border-radius: 12px;
   padding: 18px 20px; position: relative;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(166, 25, 46, 0.06);
+}
+.card-urgent:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 24px rgba(166, 25, 46, 0.15);
+  border-color: var(--kw-dark);
 }
 .card-urgent::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: var(--kw); border-radius: 12px 12px 0 0;
+  background: linear-gradient(90deg, var(--kw) 0%, #d32f2f 100%);
+  border-radius: 12px 12px 0 0;
 }
 .card-urgent .top {
   display: flex; gap: 6px; align-items: center; margin-bottom: 10px;
 }
 .dday {
-  background: var(--kw); color: #fff; font-size: 12px; font-weight: 700;
+  background: linear-gradient(135deg, var(--kw) 0%, var(--kw-dark) 100%);
+  color: #fff; font-size: 12px; font-weight: 700;
   padding: 3px 10px; border-radius: 6px; letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(166, 25, 46, 0.25);
 }
 .card-urgent h4 {
   font-size: 15.5px; font-weight: 600; line-height: 1.45; margin-bottom: 10px;
+  transition: color 0.2s;
 }
+.card-urgent:hover h4 { color: var(--kw-dark); }
 .card-urgent .meta { font-size: 12.5px; color: var(--text-3); }
 
 /* Regular cards */
-.cards { display: flex; flex-direction: column; gap: 10px; }
+.cards { display: flex; flex-direction: column; gap: 12px; }
 .card {
   background: #fff; border: 1px solid var(--border); border-radius: 12px;
-  padding: 18px 22px; transition: box-shadow 0.15s, border-color 0.15s;
+  padding: 20px 24px; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.02);
 }
 .card:hover {
-  border-color: var(--border-soft);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+  border-color: #f7d2d7;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(166, 25, 46, 0.08);
 }
 .card.dimmed { opacity: 0.55; }
 .card .tags {

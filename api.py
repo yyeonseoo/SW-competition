@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from typing import List, Optional
 
@@ -5,21 +6,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from common import (
-    ACTIVITY_CATEGORIES,
-    DB_NAME,
-    INTEREST_CATEGORIES,
-    create_student,
-    init_db,
-)
+from database import DB_NAME, create_student, init_db
 from recommend import build_dashboard, get_student_by_id
 from regions import REGIONS
+from utils.classifier import ACTIVITY_CATEGORIES, INTEREST_CATEGORIES
 
-app = FastAPI(title="KW-LIFE API")
+app = FastAPI(title="KW-LIFE API", description="광운 대학교 비교과 맞춤 추천 시스템 API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -95,8 +91,6 @@ def patch_student(student_id: int, body: StudentPatch):
         return _student_response(student_id)
 
     if "interest_categories" in updates:
-        import json
-
         updates["interest_categories"] = json.dumps(
             updates["interest_categories"], ensure_ascii=False
         )

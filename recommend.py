@@ -2,19 +2,16 @@ import json
 import re
 import sqlite3
 
-from common import (
-    DB_NAME,
-    clean_text,
-    compute_dday,
-    extract_deadline_date,
-    init_db,
-    today_kst,
-)
+from database import DB_NAME, init_db
 from departments import COLLEGES, all_departments, college_of
+from utils.classifier import is_noise_notice
+from utils.text_processor import clean_text, compute_dday, extract_deadline_date, today_kst
 
 # 긴 이름부터 찾아 부분 문자열 충돌을 줄인다(regions.py의 지역 매칭과 같은 방식).
 _ALL_DEPARTMENTS = sorted(all_departments(), key=len, reverse=True)
 _ALL_COLLEGES = sorted(COLLEGES.keys(), key=len, reverse=True)
+INTERNATIONAL_ONLY_BOARD_CATEGORIES = {"국제학생"}
+
 
 
 def _find_known_names(text, candidates):
@@ -120,26 +117,28 @@ def _student_from_row(row):
     return student
 
 
-# [국제학생] 게시판 공지는 유학생 대상 안내(수강신청/장학금/기숙사 등)라 국내 학생에게는
-# 노출하지 않는다. [국제교류] 게시판은 KW 재학생의 해외교환·인턴십 등 국내 학생도 볼 대상이라
-# 별도로 취급하지 않는다(그대로 노출).
-INTERNATIONAL_ONLY_BOARD_CATEGORIES = {"국제학생"}
-
-
 def _match_activities(student, activity_rows):
     results = []
     for row in activity_rows:
         activity = dict(row)
+
+        # 국제학생 전용 공고 필터링: 국내 학생(is_international=0)에게는 노출하지 않음
+        if activity.get("source_section", "") in INTERNATIONAL_ONLY_BOARD_CATEGORIES and not student.get("is_international", 0):
+            continue
+
+        # 3차 노이즈 필터: DB에 이미 유입된 과거 노이즈 공고라 할지라도 화면 노출 직전에 확실하게 차단
+        if is_noise_notice(
+            activity.get("title", ""),
+            board_category=activity.get("source_section", ""),
+            body_text=activity.get("body_text", ""),
+            ocr_text=activity.get("ocr_text", ""),
+            activity_category=activity.get("activity_category")
+        ):
+            continue
+
         activity["interest_categories"] = load_json(
             activity["interest_categories"], ["기타"]
         )
-
-        # 국제학생 전용 게시판은 국제학생으로 표시된 학생에게만 노출한다.
-        if (
-            activity["source_section"] in INTERNATIONAL_ONLY_BOARD_CATEGORIES
-            and not student.get("is_international")
-        ):
-            continue
 
         is_scholarship = activity["activity_category"] == "장학·지원"
         is_internship = activity["activity_category"] == "인턴·채용"
@@ -147,7 +146,7 @@ def _match_activities(student, activity_rows):
 
         # 장학·지원은 전공 불문: 학과 조건을 적용하지 않는다.
         if not is_scholarship:
-            if not department_matches(student["department"], activity["target_raw"]):
+            if not department_matches(student["department"], activity.get("target_raw", "")):
                 continue
 
         # 교내 프로그램은 관심분야를 보지 않는다(학과·지역만 본다). 교외는 기존대로 관심분야를 본다.
@@ -158,15 +157,13 @@ def _match_activities(student, activity_rows):
             ):
                 continue
 
-        if not grade_matches(student["grade"], activity["target_raw"]):
+        if not grade_matches(student["grade"], activity.get("target_raw", "")):
             continue
 
         # 인턴·채용은 본문에 학년 조건이 없어도 정책상 2학년 이상만 노출한다.
         if is_internship and student["grade"] < 2:
             continue
 
-        # 지역: 교내 일반은 지역 무관(온캠퍼스 행사의 "장소" 주소가 거주지 제한으로 잘못
-        # 추출되는 사례가 있어 지역을 걸면 정상 공고까지 막힘). 교내 장학·지원과 교외 전체만 확인.
         if (not is_internal or is_scholarship) and not region_matches(student, activity):
             continue
 
@@ -232,7 +229,6 @@ def _card_from_activity(activity):
     dday = compute_dday(deadline_date)
     first_seen = (activity.get("first_seen_at") or "")[:10]
 
-    # 지역 뱃지는 실제로 지역 조건이 적용되는 경우에만 보여준다(교내 장학·지원, 교외 전체).
     is_internal = activity["campus_scope"] == "교내"
     is_scholarship = activity["activity_category"] == "장학·지원"
     region_relevant = (
@@ -266,7 +262,6 @@ def build_dashboard(student_id):
     student, matched = recommend_for_student_id(student_id)
 
     cards = [_card_from_activity(activity) for activity in matched]
-    # 마감일이 확인되고 이미 지난 공고는 개인화 화면에서 제외한다(DB 원본은 그대로 둔다).
     cards = [card for card in cards if not (card["dday"] is not None and card["dday"] < 0)]
 
     internal_cards = [card for card in cards if card["campus_scope"] == "교내"]
@@ -276,7 +271,6 @@ def build_dashboard(student_id):
     external_urgent, external_rest = _split_urgent(external_cards)
 
     kw_external_cards = [card for card in external_rest if card["source"] == "광운대학교"]
-    # 링커리어는 notice.md 스펙대로 최대 6개만 노출한다.
     linkareer_cards = [card for card in external_rest if card["source"] == "링커리어"][:6]
 
     return {
@@ -297,24 +291,26 @@ def build_dashboard(student_id):
 
 
 def main():
-    student, results = recommend_for_student("김학생")
+    try:
+        student, results = recommend_for_student("김학생")
+        print(
+            f"{student['name']} / {student['department']} / "
+            f"{student['grade']}학년 / "
+            f"{student['region_sido']} {student['region_sigungu']}"
+        )
+        print(f"추천 결과: {len(results)}개\n")
 
-    print(
-        f"{student['name']} / {student['department']} / "
-        f"{student['grade']}학년 / "
-        f"{student['region_sido']} {student['region_sigungu']}"
-    )
-    print(f"추천 결과: {len(results)}개\n")
-
-    for index, item in enumerate(results, start=1):
-        review = " [검토 필요]" if item["review_required"] else ""
-        print(f"[{index}] [{item['source']}] {item['title']}{review}")
-        print(f"    카테고리: {item['activity_category']}")
-        print(f"    관심분야: {', '.join(item['interest_categories'])}")
-        print(f"    지역: {item['region_detail'] or item['region_sido']}")
-        print(f"    모집대상: {item['target_raw'] or '확인 필요'}")
-        print(f"    기준일: {item['reference_date']} ({item['date_basis']})")
-        print(f"    URL: {item['url']}\n")
+        for index, item in enumerate(results, start=1):
+            review = " [검토 필요]" if item["review_required"] else ""
+            print(f"[{index}] [{item['source']}] {item['title']}{review}")
+            print(f"    카테고리: {item['activity_category']}")
+            print(f"    관심분야: {', '.join(item['interest_categories'])}")
+            print(f"    지역: {item['region_detail'] or item['region_sido']}")
+            print(f"    모집대상: {item.get('target_raw', '') or '확인 필요'}")
+            print(f"    기준일: {item['reference_date']} ({item['date_basis']})")
+            print(f"    URL: {item['url']}\n")
+    except ValueError as e:
+        print(f"[알림] {e} (테스트용 '김학생' 데이터가 아직 생성되지 않았을 수 있습니다.)")
 
 
 if __name__ == "__main__":

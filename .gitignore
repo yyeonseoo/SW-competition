@@ -26,3 +26,28 @@ kw_recent.json
 kw_review.csv
 linkareer_recent.csv
 linkareer_recent.json
+
+# 개인정보 및 로컬 데이터베이스 (유저 및 이메일 데이터 기여 방지)
+*.db
+*.sqlite
+*.sqlite3
+recommendation.db
+
+# Node / Next.js 빌드 캐시 및 의존성 라이브러리
+node_modules/
+web/node_modules/
+.next/
+web/.next/
+out/
+web/out/
+dist/
+build/
+*.tsbuildinfo
+
+# 보안 및 인증 시크릿 (메일 SMTP, API 키)
+*.pem
+*.key
+secrets.*
+web/.env*
+!web/.env.example
+

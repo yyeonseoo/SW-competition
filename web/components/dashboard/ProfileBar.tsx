@@ -13,8 +13,7 @@ export default function ProfileBar({ student, newTodayCount, onEditClick }: Prop
     <div className="profile-bar">
       <div>
         <div className="greeting">
-          <b>{student.department}</b>님, 오늘 새로운 공고{" "}
-          <b style={{ color: "var(--kw)" }}>{newTodayCount}개</b>가 도착했어요
+          <b>{student.department} ({student.grade}학년)</b>님의 맞춤 비교과 활동 대시보드
         </div>
         <div className="profile-chips">
           <span className="chip major">

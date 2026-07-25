@@ -19,6 +19,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
   const [sido, setSido] = useState(student.region_sido);
   const [sigungu, setSigungu] = useState(student.region_sigungu);
   const [interests, setInterests] = useState<string[]>(student.interest_categories);
+  const [email, setEmail] = useState(student.email || "");
   const [notifyOptIn, setNotifyOptIn] = useState(student.notify_opt_in === 1);
   const [isInternational, setIsInternational] = useState(student.is_international === 1);
   const [saving, setSaving] = useState(false);
@@ -42,6 +43,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
         region_sido: sido,
         region_sigungu: sigungu,
         interest_categories: interests,
+        email: email.trim() || null,
         notify_opt_in: notifyOptIn ? 1 : 0,
         is_international: isInternational ? 1 : 0,
       });
@@ -173,14 +175,24 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
           <div className="field">
             <div className="toggle-row">
               <div className="label">
-                <b>이메일 알림</b>
-                <small>{student.email || "이메일 미설정"} · 하루 1회 요약</small>
+                <b>새 맞춤 공고 이메일 알림 (매일 오전 8시)</b>
+                <small>하루 1회 요약 · 새 공고가 있을 때만 발송</small>
               </div>
               <div
                 className={`toggle${notifyOptIn ? " on" : ""}`}
                 onClick={() => setNotifyOptIn((v) => !v)}
               />
             </div>
+          </div>
+          <div className="field">
+            <label>이메일 주소</label>
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@kw.ac.kr (알림 수신용 주소 입력)"
+            />
           </div>
           {error && (
             <div className="hint" style={{ color: "var(--kw)" }}>
