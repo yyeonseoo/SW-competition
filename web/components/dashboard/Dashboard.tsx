@@ -185,7 +185,7 @@ export default function Dashboard({ studentId, onReset }: Props) {
             <UrgentSection cards={visibleInternalUrgent} />
             <div className="section-head" style={{ marginTop: 32 }}>
               <h3>{internalCategory === "전체" ? "전체 공고" : internalCategory}</h3>
-              <span className="meta">최신순</span>
+              <span className="meta">추천순</span>
             </div>
             <CardList
               cards={visibleInternalCards}
