@@ -9,7 +9,7 @@ with sqlite3.connect(DB_NAME) as conn:
 
     print("[공고]")
     for row in conn.execute("""
-        SELECT source, source_section, title, activity_category,
+        SELECT source, source_section, campus_scope, title, activity_category,
                interest_categories, region_detail, region_status,
                target_raw, reference_date, date_basis, ocr_used, missing_before_ocr,
                review_required, url
