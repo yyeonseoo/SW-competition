@@ -28,7 +28,6 @@ export default function ActivityCard({ card }: Props) {
         {card.region_relevant && regionLabel && (
           <span className="badge region">📍 {regionLabel}</span>
         )}
-        {card.is_new && <span className="badge new">NEW</span>}
       </div>
       <h4>{card.title}</h4>
       {card.recommendation_reason && (
@@ -45,7 +44,9 @@ export default function ActivityCard({ card }: Props) {
           <b>{card.source}</b>
         </span>
         <span>
-          {card.deadline_date ? `모집 ~ ${card.deadline_date}` : "모집기간 확인 필요"}
+          {card.deadline_date
+            ? `모집 ~ ${card.deadline_date}`
+            : card.application_period_text || "모집기간 확인 필요"}
         </span>
         <span>
           {card.date_basis === "GPT 구조화 시작일" ||

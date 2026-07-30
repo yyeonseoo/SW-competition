@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -119,6 +120,9 @@ INSTRUCTIONS = """
 - application_start_date/application_end_date에는 모집·신청·접수 기간만 넣는다.
 - program_start_date/program_end_date에는 교육·활동·행사·상담 등 실제 진행 기간만 넣는다.
 - 접수기간이 없고 진행기간만 있으면 application 날짜는 반드시 null이다. 진행기간을 접수기간으로 복사하지 않는다.
+- "모집 시 마감", "채용 시 마감", "상시 모집"처럼 날짜가 명시되지 않은 마감은 application_end_date=null이다.
+- 시작일만 있고 마감일이 날짜로 명시되지 않았으면 시작일을 마감일에 복사하지 않는다.
+- 링커리어 상단 정보의 접수기간과 활동기간이 함께 있으면 접수기간 블록만 application 날짜로 사용한다.
 - 확실하지 않은 값은 추측하지 말고 빈 배열, null, unknown을 사용한다.
 - evidence는 원문에서 판단 근거가 되는 짧은 구절만 적는다.
 """
@@ -167,6 +171,74 @@ def build_input(activity, max_chars: int = 12000) -> str:
         f"OCR:\n{ocr}"
     )
     return text[:max_chars]
+
+
+_DATE_VALUE_RE = re.compile(r"\d{4}[-./년]\s*\d{1,2}[-./월]\s*\d{1,2}")
+_APPLICATION_WORD_RE = re.compile(r"접수|신청|모집|지원|제출")
+
+
+def _iso_date(value) -> str:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"null", "none", "unknown"}:
+        return ""
+    match = re.search(r"(\d{4})\D+(\d{1,2})\D+(\d{1,2})", text)
+    if not match:
+        return ""
+    try:
+        return datetime(
+            int(match.group(1)), int(match.group(2)), int(match.group(3))
+        ).strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
+def _date_appears_in_evidence(date_value: str, evidence: str) -> bool:
+    if not date_value or not evidence:
+        return False
+    compact_evidence = re.sub(r"\D", "", evidence)
+    return date_value.replace("-", "") in compact_evidence
+
+
+def resolve_application_dates(activity, structured: dict) -> tuple[str, str]:
+    """명시적인 접수 근거가 있는 날짜만 DB 표시용 값으로 확정한다.
+
+    링커리어 상단의 접수기간은 크롤러가 직접 읽은 값을 최우선으로 사용한다.
+    이 블록이 '모집 시 마감'이면 GPT가 활동 종료일을 마감일로 추측했더라도
+    마감일을 비워 둔다.
+    """
+    body = str(activity["body_text"] or "")
+    existing_start = _iso_date(activity["application_start_date"])
+    existing_end = _iso_date(activity["application_end_date"])
+
+    if activity["source"] == "링커리어" and "접수기간" in body:
+        segment = body.split("접수기간", 1)[1].split("활동기간", 1)[0]
+        start_match = re.search(
+            r"시작일\s*[:：\-]?\s*(\d{4}[-./년]\s*\d{1,2}[-./월]\s*\d{1,2})",
+            segment,
+        )
+        end_match = re.search(
+            r"마감일\s*[:：\-]?\s*(\d{4}[-./년]\s*\d{1,2}[-./월]\s*\d{1,2})",
+            segment,
+        )
+        start = _iso_date(start_match.group(1)) if start_match else existing_start
+        end = _iso_date(end_match.group(1)) if end_match else ""
+        return start, end
+
+    evidence = str(structured.get("application_period_evidence") or "")
+    if not _APPLICATION_WORD_RE.search(evidence):
+        return existing_start, existing_end
+
+    model_start = _iso_date(structured.get("application_start_date"))
+    model_end = _iso_date(structured.get("application_end_date"))
+    start = existing_start or (
+        model_start if _date_appears_in_evidence(model_start, evidence) else ""
+    )
+    end = existing_end or (
+        model_end if _date_appears_in_evidence(model_end, evidence) else ""
+    )
+    if start and end and end < start:
+        end = ""
+    return start, end
 
 
 def structure_activity(activity, client: OpenAI | None = None):

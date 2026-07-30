@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DEFAULT_COLLEGE, DEFAULT_DEPARTMENT, getDepartments } from "@/data/departments";
 import { createStudent, getMeta } from "@/lib/api";
 import { setStoredStudentId } from "@/lib/studentId";
 import type { MetaResponse } from "@/lib/types";
@@ -19,42 +18,56 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [college, setCollege] = useState(DEFAULT_COLLEGE);
-  const [department, setDepartment] = useState(DEFAULT_DEPARTMENT);
-  const [grade, setGrade] = useState(3);
+  const [college, setCollege] = useState("");
+  const [department, setDepartment] = useState("");
+  const [grade, setGrade] = useState(0);
+  const [enrollmentStatus, setEnrollmentStatus] = useState("");
   const [sido, setSido] = useState("");
   const [sigungu, setSigungu] = useState("");
+  const [isInternational, setIsInternational] = useState<boolean | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
+  const [activityTypes, setActivityTypes] = useState<string[]>([]);
+  const [preferenceText, setPreferenceText] = useState("");
   const [notifyOptIn, setNotifyOptIn] = useState(true);
   const [email, setEmail] = useState("");
-  const [isInternational, setIsInternational] = useState(false);
-  const [preferenceText, setPreferenceText] = useState("");
 
   useEffect(() => {
     getMeta()
       .then(setMeta)
-      .catch(() => setError("서버에 연결할 수 없어요. 백엔드(api.py)가 실행 중인지 확인해주세요."));
+      .catch(() => setError("서버에 연결할 수 없어요. 백엔드가 실행 중인지 확인해주세요."));
   }, []);
 
+  const stepOneComplete = Boolean(college && department && grade && enrollmentStatus);
+  const stepTwoComplete = Boolean(sido && sigungu && isInternational !== null);
+
   function toggleInterest(tag: string) {
-    setInterests((prev) =>
-      prev.includes(tag) ? prev.filter((v) => v !== tag) : [...prev, tag]
+    setInterests((current) =>
+      current.includes(tag) ? current.filter((value) => value !== tag) : [...current, tag]
+    );
+  }
+
+  function toggleActivityType(tag: string) {
+    setActivityTypes((current) =>
+      current.includes(tag) ? current.filter((value) => value !== tag) : [...current, tag]
     );
   }
 
   async function submit() {
+    if (!stepOneComplete || !stepTwoComplete) return;
     setSubmitting(true);
     setError(null);
     try {
       const student = await createStudent({
         department,
         grade,
+        enrollment_status: enrollmentStatus,
         region_sido: sido,
         region_sigungu: sigungu,
         interest_categories: interests,
+        preferred_activity_types: activityTypes,
         email: email || null,
         notify_opt_in: notifyOptIn ? 1 : 0,
-        is_international: isInternational ? 1 : 0,
+        is_international: isInternational === true ? 1 : 0,
         preference_text: preferenceText,
       });
       setStoredStudentId(student.id);
@@ -68,17 +81,18 @@ export default function OnboardingWizard({ onComplete }: Props) {
   return (
     <div className="onboarding-card">
       <div className="steps">
-        <div className={`step${step === 1 ? " on" : step > 1 ? " done" : ""}`}>
-          <span className="dot">{step > 1 ? "✓" : 1}</span> 전공·학년
-        </div>
-        <div className={`step-line${step > 1 ? " done" : ""}`} />
-        <div className={`step${step === 2 ? " on" : step > 2 ? " done" : ""}`}>
-          <span className="dot">{step > 2 ? "✓" : 2}</span> 거주지역
-        </div>
-        <div className={`step-line${step > 2 ? " done" : ""}`} />
-        <div className={`step${step === 3 ? " on" : ""}`}>
-          <span className="dot">3</span> 관심분야·알림
-        </div>
+        {["학교 정보", "자격 정보", "관심 정보"].map((label, index) => {
+          const number = index + 1;
+          return (
+            <div className="step-wrap" key={label}>
+              <div className={`step${step === number ? " on" : step > number ? " done" : ""}`}>
+                <span className="dot">{step > number ? "✓" : number}</span>
+                {label}
+              </div>
+              {number < 3 && <div className={`step-line${step > number ? " done" : ""}`} />}
+            </div>
+          );
+        })}
       </div>
 
       <div className="step-panel active" key={step}>
@@ -88,18 +102,24 @@ export default function OnboardingWizard({ onComplete }: Props) {
               college={college}
               department={department}
               grade={grade}
-              onChangeCollege={(v) => {
-                setCollege(v);
-                setDepartment(getDepartments(v)[0] ?? "");
+              enrollmentStatus={enrollmentStatus}
+              onChangeCollege={(value) => {
+                setCollege(value);
+                setDepartment("");
               }}
               onChangeDepartment={setDepartment}
               onChangeGrade={setGrade}
+              onChangeEnrollmentStatus={setEnrollmentStatus}
             />
+            <div className="required-help">
+              {!stepOneComplete && "필수 항목을 모두 선택하면 다음 단계로 이동할 수 있어요."}
+            </div>
             <div className="cta-row">
-              <button className="btn btn-text" onClick={submit} disabled={submitting}>
-                건너뛰기
-              </button>
-              <button className="btn btn-primary" onClick={() => setStep(2)}>
+              <button
+                className="btn btn-primary"
+                onClick={() => setStep(2)}
+                disabled={!stepOneComplete}
+              >
                 다음 →
               </button>
             </div>
@@ -113,34 +133,29 @@ export default function OnboardingWizard({ onComplete }: Props) {
                 regions={meta.regions}
                 sido={sido}
                 sigungu={sigungu}
-                onChangeSido={(v) => {
-                  setSido(v);
+                onChangeSido={(value) => {
+                  setSido(value);
                   setSigungu("");
                 }}
                 onChangeSigungu={setSigungu}
                 isInternational={isInternational}
-                onToggleInternational={() => setIsInternational((v) => !v)}
+                onChangeInternational={setIsInternational}
               />
             ) : (
               <p className="lead">지역 목록을 불러오는 중...</p>
             )}
-            <div className="hint">
-              해당 없거나 나중에 정해도 돼요.{" "}
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setStep(3);
-                }}
-              >
-                이 단계 건너뛰기
-              </a>
+            <div className="required-help">
+              {!stepTwoComplete && "필수 항목을 모두 선택하면 다음 단계로 이동할 수 있어요."}
             </div>
             <div className="cta-row">
               <button className="btn btn-ghost" onClick={() => setStep(1)}>
                 ← 이전
               </button>
-              <button className="btn btn-primary" onClick={() => setStep(3)}>
+              <button
+                className="btn btn-primary"
+                onClick={() => setStep(3)}
+                disabled={!stepTwoComplete}
+              >
                 다음 →
               </button>
             </div>
@@ -154,8 +169,11 @@ export default function OnboardingWizard({ onComplete }: Props) {
                 allInterests={meta.interest_categories}
                 selected={interests}
                 onToggle={toggleInterest}
+                allActivityTypes={meta.preferred_activity_types}
+                selectedActivityTypes={activityTypes}
+                onToggleActivityType={toggleActivityType}
                 notifyOptIn={notifyOptIn}
-                onToggleNotify={() => setNotifyOptIn((v) => !v)}
+                onToggleNotify={() => setNotifyOptIn((value) => !value)}
                 email={email}
                 onChangeEmail={setEmail}
                 preferenceText={preferenceText}
@@ -164,17 +182,14 @@ export default function OnboardingWizard({ onComplete }: Props) {
             ) : (
               <p className="lead">관심분야 목록을 불러오는 중...</p>
             )}
-            {error && (
-              <div className="hint" style={{ color: "var(--kw)" }}>
-                {error}
-              </div>
-            )}
+            <div className="optional-note">이 단계는 선택사항이며 비워두어도 추천받을 수 있어요.</div>
+            {error && <div className="form-error">{error}</div>}
             <div className="cta-row">
               <button className="btn btn-ghost" onClick={() => setStep(2)}>
                 ← 이전
               </button>
               <button className="btn btn-primary" onClick={submit} disabled={submitting}>
-                {submitting ? "저장 중..." : "시작하기"}
+                {submitting ? "저장 중..." : "추천 시작하기"}
               </button>
             </div>
           </>

@@ -57,6 +57,20 @@ JY_local/               기획 문서(notice.md)·프로토타입 — 코드 대
 
 ### 1. 백엔드 (수집 스크립트 + API)
 
+이미 가상환경과 패키지 설치가 끝난 Windows 개발 환경에서는 프로젝트 루트에서 다음 명령으로
+백엔드를 실행한다.
+
+```powershell
+cd C:\Users\USER\sw
+.\.venv\Scripts\python.exe -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
+```
+
+정상적으로 실행되면 터미널에 `Uvicorn running on http://127.0.0.1:8000`이 표시된다.
+해당 터미널을 닫지 않은 상태에서 웹을 실행하며, API 문서는
+`http://127.0.0.1:8000/docs`에서 확인할 수 있다. 서버 종료는 터미널에서 `Ctrl+C`를 누른다.
+
+처음 환경을 구성하는 경우에는 아래 순서로 가상환경과 의존성을 설치한다.
+
 ```
 python3 -m venv .venv
 source .venv/bin/activate
@@ -101,9 +115,10 @@ python build_embeddings.py                # 새/변경된 개인화 공고 임�
 합친 추천 문장의 해시를 캐시한다. 같은 공고는 다시 호출하지 않는다. 학생 임베딩은 전공·학년·관심분야·
 선호 활동 문장으로 만들며 프로필이 바뀐 경우에만 대시보드 최초 요청에서 갱신한다.
 
-API 서버 실행 (프론트엔드가 여길 바라봄):
-```
-uvicorn api:app --reload --port 8000
+API 서버 실행 (macOS/Linux 또는 가상환경이 이미 활성화된 터미널):
+
+```bash
+uvicorn api:app --reload --host 127.0.0.1 --port 8000
 ```
 
 기타 CLI 유틸:

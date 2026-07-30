@@ -4,28 +4,39 @@ import { useState } from "react";
 import { COLLEGES, findCollegeForDepartment, getDepartments } from "@/data/departments";
 import { patchStudent } from "@/lib/api";
 import type { MetaResponse, Student } from "@/lib/types";
+import CustomSelect from "@/components/ui/CustomSelect";
 
 interface Props {
   student: Student;
   meta: MetaResponse | null;
   onClose: () => void;
-  onSaved: (student: Student) => void;
+  onSaved: (student: Student) => Promise<void>;
 }
 
 export default function ProfileEditModal({ student, meta, onClose, onSaved }: Props) {
   const [college, setCollege] = useState(() => findCollegeForDepartment(student.department));
   const [department, setDepartment] = useState(student.department);
   const [grade, setGrade] = useState(student.grade);
+  const [enrollmentStatus, setEnrollmentStatus] = useState(
+    student.enrollment_status || "enrolled"
+  );
   const [sido, setSido] = useState(student.region_sido);
   const [sigungu, setSigungu] = useState(student.region_sigungu);
   const [interests, setInterests] = useState<string[]>(student.interest_categories);
+  const [activityTypes, setActivityTypes] = useState<string[]>(
+    student.preferred_activity_types ?? []
+  );
   const [notifyOptIn, setNotifyOptIn] = useState(student.notify_opt_in === 1);
   const [isInternational, setIsInternational] = useState(student.is_international === 1);
   const [preferenceText, setPreferenceText] = useState(student.preference_text || "");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sigunguOptions = meta && sido ? meta.regions[sido] ?? [] : [];
+  const requiredComplete = Boolean(
+    college && department && grade && enrollmentStatus && sido && sigungu
+  );
 
   function toggleInterest(tag: string) {
     setInterests((prev) =>
@@ -33,24 +44,38 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
     );
   }
 
+  function toggleActivityType(tag: string) {
+    setActivityTypes((prev) =>
+      prev.includes(tag) ? prev.filter((v) => v !== tag) : [...prev, tag]
+    );
+  }
+
   async function handleSave() {
+    if (!requiredComplete) {
+      setError("필수 정보를 모두 선택해주세요.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const updated = await patchStudent(student.id, {
         department,
         grade,
+        enrollment_status: enrollmentStatus,
         region_sido: sido,
         region_sigungu: sigungu,
         interest_categories: interests,
+        preferred_activity_types: activityTypes,
         notify_opt_in: notifyOptIn ? 1 : 0,
         is_international: isInternational ? 1 : 0,
         preference_text: preferenceText,
       });
-      onSaved(updated);
+      setRefreshing(true);
+      await onSaved(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "저장에 실패했어요.");
       setSaving(false);
+      setRefreshing(false);
     }
   }
 
@@ -58,13 +83,13 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
     <div
       className="modal-overlay"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (!saving && e.target === e.currentTarget) onClose();
       }}
     >
       <div className="modal-card">
         <div className="modal-head">
           <h3>프로필 편집</h3>
-          <button className="modal-close" onClick={onClose}>
+          <button className="modal-close" onClick={onClose} disabled={saving}>
             ✕
           </button>
         </div>
@@ -74,73 +99,65 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
           </div>
           <div className="field">
             <div className="row">
-              <select
-                className="select"
+              <CustomSelect
                 value={college}
-                onChange={(e) => {
-                  const newCollege = e.target.value;
+                options={COLLEGES.map((item) => ({ value: item.name, label: item.name }))}
+                onChange={(newCollege) => {
                   setCollege(newCollege);
                   setDepartment(getDepartments(newCollege)[0] ?? "");
                 }}
-              >
-                {COLLEGES.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="select"
+              />
+              <CustomSelect
                 value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-              >
-                {getDepartments(college).map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="select"
-                value={grade}
-                onChange={(e) => setGrade(Number(e.target.value))}
-              >
-                {[1, 2, 3, 4].map((g) => (
-                  <option key={g} value={g}>
-                    {g}학년
-                  </option>
-                ))}
-              </select>
+                options={getDepartments(college).map((name) => ({ value: name, label: name }))}
+                onChange={setDepartment}
+              />
+              <CustomSelect
+                value={String(grade)}
+                options={[1, 2, 3, 4].map((value) => ({
+                  value: String(value),
+                  label: `${value}학년`,
+                }))}
+                onChange={(value) => setGrade(Number(value))}
+              />
             </div>
+          </div>
+          <div className="field">
+            <label>학적 상태</label>
+            <CustomSelect
+              value={enrollmentStatus}
+              options={[
+                { value: "freshman", label: "신입생" },
+                { value: "enrolled", label: "재학생" },
+                { value: "on_leave", label: "휴학생" },
+                { value: "graduating", label: "졸업예정자" },
+              ]}
+              onChange={setEnrollmentStatus}
+            />
           </div>
 
           <div className="section-subtitle">거주지역</div>
           <div className="field">
             <div className="row">
-              <select
-                className="select"
+              <CustomSelect
                 value={sido}
-                onChange={(e) => {
-                  setSido(e.target.value);
+                placeholder="시·도 선택"
+                options={Object.keys(meta?.regions ?? {}).map((name) => ({
+                  value: name,
+                  label: name,
+                }))}
+                onChange={(value) => {
+                  setSido(value);
                   setSigungu("");
                 }}
-              >
-                <option value="">시·도 선택</option>
-                {meta &&
-                  Object.keys(meta.regions).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-              </select>
-              <select className="select" value={sigungu} onChange={(e) => setSigungu(e.target.value)}>
-                <option value="">구/시·군 선택</option>
-                {sigunguOptions.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              />
+              <CustomSelect
+                value={sigungu}
+                placeholder="시·군·구 선택"
+                disabled={!sido}
+                options={sigunguOptions.map((name) => ({ value: name, label: name }))}
+                onChange={setSigungu}
+              />
             </div>
           </div>
           <div className="field">
@@ -156,7 +173,7 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
             </div>
           </div>
 
-          <div className="section-subtitle">관심분야</div>
+          <div className="section-subtitle">관심 주제</div>
           <div className="field">
             <div className="tag-picker">
               {(meta?.interest_categories ?? []).map((tag) => (
@@ -171,7 +188,22 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
             </div>
           </div>
 
-          <div className="section-subtitle">선호하는 활동 유형</div>
+          <div className="section-subtitle">선호 활동 유형</div>
+          <div className="field">
+            <div className="tag-picker">
+              {(meta?.preferred_activity_types ?? []).map((tag) => (
+                <span
+                  key={tag}
+                  className={`tag${activityTypes.includes(tag) ? " on" : ""}`}
+                  onClick={() => toggleActivityType(tag)}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="section-subtitle">원하는 활동 설명</div>
           <div className="field">
             <textarea
               className="input preference-input"
@@ -200,13 +232,27 @@ export default function ProfileEditModal({ student, meta, onClose, onSaved }: Pr
               {error}
             </div>
           )}
+          {saving && (
+            <div className="profile-save-status" role="status" aria-live="polite">
+              <span className="loading-spinner" aria-hidden="true" />
+              <span>
+                {refreshing
+                  ? "새 프로필에 맞춰 추천을 다시 계산하고 있어요."
+                  : "프로필을 저장하고 있어요."}
+              </span>
+            </div>
+          )}
         </div>
         <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             취소
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? "저장 중..." : "저장"}
+              <button
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={saving || !requiredComplete}
+              >
+            {refreshing ? "추천 반영 중..." : saving ? "저장 중..." : "저장"}
           </button>
         </div>
       </div>

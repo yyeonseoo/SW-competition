@@ -3,7 +3,9 @@ export interface Student {
   name: string;
   department: string;
   grade: number;
+  enrollment_status: string;
   interest_categories: string[];
+  preferred_activity_types: string[];
   region_sido: string;
   region_sigungu: string;
   email: string | null;
@@ -34,10 +36,12 @@ export interface ActivityCard {
   first_seen_at: string;
   last_seen_at: string;
   deadline_date: string;
+  application_period_text: string;
   dday: number | null;
   is_new: boolean;
   region_relevant: boolean;
   recommendation_score: number | null;
+  semantic_similarity: number | null;
   recommendation_reason: string;
   eligibility_uncertain: boolean;
   reference_age_days: number | null;
@@ -62,6 +66,7 @@ export interface DashboardResponse {
 
 export interface MetaResponse {
   interest_categories: string[];
+  preferred_activity_types: string[];
   activity_categories: string[];
   regions: Record<string, string[]>;
 }
@@ -69,9 +74,11 @@ export interface MetaResponse {
 export interface StudentInput {
   department: string;
   grade: number;
+  enrollment_status: string;
   region_sido: string;
   region_sigungu: string;
   interest_categories: string[];
+  preferred_activity_types: string[];
   email?: string | null;
   notify_opt_in?: number;
   is_international?: number;

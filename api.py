@@ -1,5 +1,5 @@
 import sqlite3
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +9,7 @@ from common import (
     ACTIVITY_CATEGORIES,
     DB_NAME,
     INTEREST_CATEGORIES,
+    PREFERRED_ACTIVITY_TYPES,
     create_student,
     init_db,
 )
@@ -31,11 +32,13 @@ def on_startup():
 
 
 class StudentIn(BaseModel):
-    department: str
+    department: str = Field(min_length=1)
     grade: int = Field(ge=1, le=4)
-    region_sido: str
-    region_sigungu: str = ""
+    enrollment_status: Literal["freshman", "enrolled", "on_leave", "graduating"]
+    region_sido: str = Field(min_length=1)
+    region_sigungu: str = Field(min_length=1)
     interest_categories: List[str] = []
+    preferred_activity_types: List[str] = []
     email: Optional[str] = None
     notify_opt_in: int = 1
     is_international: int = 0
@@ -45,9 +48,13 @@ class StudentIn(BaseModel):
 class StudentPatch(BaseModel):
     department: Optional[str] = None
     grade: Optional[int] = Field(default=None, ge=1, le=4)
+    enrollment_status: Optional[
+        Literal["freshman", "enrolled", "on_leave", "graduating"]
+    ] = None
     region_sido: Optional[str] = None
     region_sigungu: Optional[str] = None
     interest_categories: Optional[List[str]] = None
+    preferred_activity_types: Optional[List[str]] = None
     email: Optional[str] = None
     notify_opt_in: Optional[int] = None
     is_international: Optional[int] = None
@@ -65,6 +72,7 @@ def _student_response(student_id):
 def get_meta():
     return {
         "interest_categories": INTEREST_CATEGORIES,
+        "preferred_activity_types": PREFERRED_ACTIVITY_TYPES,
         "activity_categories": ACTIVITY_CATEGORIES,
         "regions": REGIONS,
     }
@@ -75,7 +83,9 @@ def post_student(body: StudentIn):
     student_id = create_student(
         department=body.department,
         grade=body.grade,
+        enrollment_status=body.enrollment_status,
         interest_categories=body.interest_categories,
+        preferred_activity_types=body.preferred_activity_types,
         region_sido=body.region_sido,
         region_sigungu=body.region_sigungu,
         email=body.email,
@@ -97,19 +107,31 @@ def patch_student(student_id: int, body: StudentPatch):
     if not updates:
         return _student_response(student_id)
 
-    if "interest_categories" in updates:
+    for list_field in ("interest_categories", "preferred_activity_types"):
+        if list_field not in updates:
+            continue
         import json
 
-        updates["interest_categories"] = json.dumps(
-            updates["interest_categories"], ensure_ascii=False
+        updates[list_field] = json.dumps(
+            updates[list_field], ensure_ascii=False
         )
     if any(
         key in updates
-        for key in ("department", "grade", "interest_categories", "preference_text")
+        for key in (
+            "department",
+            "grade",
+            "interest_categories",
+            "preferred_activity_types",
+            "preference_text",
+        )
     ):
         updates["embedding_data"] = None
         updates["embedding_hash"] = None
         updates["embedding_model"] = None
+    if "preference_text" in updates:
+        updates["preference_embedding_data"] = None
+        updates["preference_embedding_hash"] = None
+        updates["preference_embedding_model"] = None
 
     with sqlite3.connect(DB_NAME) as conn:
         existing = conn.execute(

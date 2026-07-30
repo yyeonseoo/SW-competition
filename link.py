@@ -45,7 +45,7 @@ ALLOWED_TARGETS = {
 }
 
 SCROLL_COUNT = 2
-MAX_DETAILS_PER_SECTION = 15
+MAX_DETAILS_PER_SECTION = 100
 REQUEST_DELAY = 1.0
 
 
@@ -857,10 +857,9 @@ def main():
                 if item["target_raw"] not in ALLOWED_TARGETS:
                     excluded_target_count += 1
                     print(
-                        "  → 참여대상 제외: "
+                        "  → 참여대상 추가 검토 대상으로 저장: "
                         f"{item['target_raw'] or '추출 실패'}"
                     )
-                    continue
 
                 if not item["reference_date"]:
                     no_start_date_count += 1
@@ -873,7 +872,7 @@ def main():
                 is_active = (
                     deadline_date >= today_kst().isoformat()
                     if deadline_date
-                    else is_recent_upload(item["reference_date"], days_back=14)
+                    else is_recent_upload(item["reference_date"], days_back=30)
                 )
                 if not is_active:
                     old_count += 1

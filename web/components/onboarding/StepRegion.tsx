@@ -1,13 +1,15 @@
 "use client";
 
+import CustomSelect from "@/components/ui/CustomSelect";
+
 interface Props {
   regions: Record<string, string[]>;
   sido: string;
   sigungu: string;
   onChangeSido: (v: string) => void;
   onChangeSigungu: (v: string) => void;
-  isInternational: boolean;
-  onToggleInternational: () => void;
+  isInternational: boolean | null;
+  onChangeInternational: (value: boolean) => void;
 }
 
 export default function StepRegion({
@@ -17,58 +19,52 @@ export default function StepRegion({
   onChangeSido,
   onChangeSigungu,
   isInternational,
-  onToggleInternational,
+  onChangeInternational,
 }: Props) {
   const sigunguOptions = sido ? regions[sido] ?? [] : [];
 
   return (
     <>
-      <h1>어디에 사세요?</h1>
-      <p className="lead">지역 장학·프로그램(예: 구리시 청년성장) 매칭에 사용해요.</p>
+      <h1>거주 및 학생 정보를 알려주세요</h1>
+      <p className="lead">지역 제한과 국제학생 전용 공고를 정확하게 구분해요.</p>
 
       <div className="field">
-        <div className="toggle-row">
-          <div className="label">
-            <b>🌐 국제학생(유학생)이에요</b>
-            <small>켜면 국제학생 대상 공지(장학금·기숙사·수강신청 안내 등)도 함께 보여드려요</small>
-          </div>
-          <div
-            className={`toggle${isInternational ? " on" : ""}`}
-            onClick={onToggleInternational}
-          />
-        </div>
-      </div>
-
-      <div className="field">
-        <label>시·도</label>
-        <select
-          className="select"
+        <label>시·도 · 필수</label>
+        <CustomSelect
           value={sido}
-          onChange={(e) => onChangeSido(e.target.value)}
-        >
-          <option value="">시·도를 선택하세요</option>
-          {Object.keys(regions).map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          placeholder="시·도를 선택하세요"
+          options={Object.keys(regions).map((name) => ({ value: name, label: name }))}
+          onChange={onChangeSido}
+        />
       </div>
       <div className="field">
-        <label>구/시·군</label>
-        <select
-          className="select"
+        <label>시·군·구 · 필수</label>
+        <CustomSelect
           value={sigungu}
-          onChange={(e) => onChangeSigungu(e.target.value)}
+          placeholder="시·군·구를 선택하세요"
           disabled={!sido}
-        >
-          <option value="">구/시·군을 선택하세요</option>
-          {sigunguOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          options={sigunguOptions.map((name) => ({ value: name, label: name }))}
+          onChange={onChangeSigungu}
+        />
+      </div>
+      <div className="field">
+        <label>국제학생 여부 · 필수</label>
+        <div className="choice-cards">
+          <button
+            type="button"
+            className={`choice-card${isInternational === false ? " selected" : ""}`}
+            onClick={() => onChangeInternational(false)}
+          >
+            국내 학생
+          </button>
+          <button
+            type="button"
+            className={`choice-card${isInternational === true ? " selected" : ""}`}
+            onClick={() => onChangeInternational(true)}
+          >
+            국제학생
+          </button>
+        </div>
       </div>
     </>
   );

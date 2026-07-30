@@ -1,12 +1,19 @@
 import argparse
 import sqlite3
+import sys
 
 from common import DB_NAME, init_db
 from notice_structurer import (
     content_hash,
     dumps_structure,
+    resolve_application_dates,
     structure_activity,
 )
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def pending_activities(
@@ -82,12 +89,17 @@ def main():
             try:
                 result = structure_activity(row)
                 data = result["data"]
+                application_start_date, application_end_date = (
+                    resolve_application_dates(row, data)
+                )
                 conn.execute(
                     """
                     UPDATE activities
                     SET content_hash = ?, structured_data = ?,
                         structure_status = 'success', structure_confidence = ?,
                         structured_at = ?, structure_model = ?, structure_error = NULL
+                        , application_start_date = ?
+                        , application_end_date = ?
                         , review_required = CASE
                             WHEN ? < 0.6 THEN 1
                             ELSE review_required
@@ -100,6 +112,8 @@ def main():
                         data["confidence"],
                         result["structured_at"],
                         result["model"],
+                        application_start_date,
+                        application_end_date,
                         data["confidence"],
                         row["id"],
                     ),

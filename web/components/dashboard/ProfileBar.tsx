@@ -4,39 +4,81 @@ import type { Student } from "@/lib/types";
 
 interface Props {
   student: Student;
+  open: boolean;
+  onClose: () => void;
   onEditClick: () => void;
 }
 
-export default function ProfileBar({ student, onEditClick }: Props) {
+export default function ProfileBar({
+  student,
+  open,
+  onClose,
+  onEditClick,
+}: Props) {
+  const region = [student.region_sido, student.region_sigungu]
+    .filter(Boolean)
+    .join(" ");
+  const interests =
+    student.interest_categories.length > 0
+      ? student.interest_categories.join(" · ")
+      : "관심분야 미설정";
+  const activityTypes =
+    student.preferred_activity_types?.length > 0
+      ? student.preferred_activity_types.join(" · ")
+      : "선호 활동 유형 미설정";
+
   return (
-    <div className="profile-bar">
-      <div className="profile-card">
-        <div className="profile-facts">
-          <div className="profile-fact">
-            <span className="profile-label">학과 · 학년</span>
-            <strong>
-              {student.department} · {student.grade}학년
-            </strong>
+    <div
+      className={`side-overlay${open ? " open" : ""}`}
+      aria-hidden={!open}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside className="profile-drawer" aria-label="내 프로필">
+        <div className="drawer-head">
+          <div>
+            <span className="profile-eyebrow">내 추천 기준</span>
+            <h2>프로필</h2>
           </div>
-          <div className="profile-fact">
-            <span className="profile-label">지역</span>
-            <strong>
-              {student.region_sido} {student.region_sigungu}
-            </strong>
-          </div>
-          <div className="profile-fact interest">
-            <span className="profile-label">관심분야</span>
-            <strong>
-              {student.interest_categories.length > 0
-                ? student.interest_categories.join(" · ")
-                : "미설정"}
-            </strong>
-          </div>
+          <button type="button" className="drawer-close" onClick={onClose}>
+            닫기
+          </button>
         </div>
-        <button className="btn-edit" onClick={onEditClick}>
-          프로필 수정
+
+        <div className="drawer-avatar">{student.department.slice(0, 2)}</div>
+        <strong className="drawer-student">
+          {student.department} · {student.grade}학년
+        </strong>
+        <p className="drawer-caption">아래 정보를 기준으로 공고를 추천해요.</p>
+
+        <dl className="profile-details">
+          <div>
+            <dt>학과 · 학년</dt>
+            <dd>{student.department} · {student.grade}학년</dd>
+          </div>
+          <div>
+            <dt>지역</dt>
+            <dd>{region || "미설정"}</dd>
+          </div>
+          <div>
+            <dt>관심 주제</dt>
+            <dd>{interests}</dd>
+          </div>
+          <div>
+            <dt>선호 활동 유형</dt>
+            <dd>{activityTypes}</dd>
+          </div>
+        </dl>
+
+        <button
+          type="button"
+          className="btn btn-primary drawer-edit"
+          onClick={onEditClick}
+        >
+          추천 기준 수정
         </button>
-      </div>
+      </aside>
     </div>
   );
 }

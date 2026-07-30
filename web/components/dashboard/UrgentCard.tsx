@@ -15,7 +15,9 @@ export default function UrgentCard({ card }: Props) {
       onClick={() => window.open(card.url, "_blank", "noopener,noreferrer")}
     >
       <div className="top">
-        <span className="dday">D-{card.dday}</span>
+        <span className="dday">
+          {card.dday === 0 ? "D-DAY" : `D-${card.dday}`}
+        </span>
         <span className={`badge cat ${badgeClassFor(card.activity_category)}`}>
           {displayLabelFor(card.activity_category)}
         </span>

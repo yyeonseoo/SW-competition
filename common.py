@@ -2,7 +2,9 @@ import json
 import re
 import sqlite3
 import uuid
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 DB_NAME = "recommendation.db"
@@ -14,7 +16,6 @@ INTEREST_CATEGORIES = [
     "여행/호텔/항공",
     "언론/미디어",
     "문화/역사",
-    "행사/페스티벌",
     "교육",
     "디자인/사진/예술/영상",
     "경제/금융",
@@ -33,6 +34,17 @@ INTEREST_CATEGORIES = [
     "기타",
 ]
 
+PREFERRED_ACTIVITY_TYPES = [
+    "공모전",
+    "해커톤/경진대회",
+    "기자단/서포터즈",
+    "봉사/사회공헌",
+    "교육/특강",
+    "인턴/현장실습",
+    "캠프/교류",
+    "행사/페스티벌",
+]
+
 FIELD_KEYWORDS = {
     "여행/호텔/항공": ["여행", "관광", "호텔", "항공", "공항", "해외탐방"],
     "언론/미디어": ["언론", "미디어", "기자", "방송", "신문", "뉴스"],
@@ -41,12 +53,20 @@ FIELD_KEYWORDS = {
     "교육": ["교육", "강의", "특강", "워크숍", "세미나", "아카데미", "부트캠프", "캠프", "실습", "연수", "강좌"],
     "디자인/사진/예술/영상": ["디자인", "사진", "영상", "예술", "미술", "포스터", "웹툰", "일러스트", "영화"],
     "경제/금융": ["경제", "금융", "투자", "은행", "증권", "회계", "재무", "부동산"],
-    "경영/컨설팅/마케팅": ["경영", "마케팅", "광고", "홍보", "브랜딩", "기획", "컨설팅"],
+    # '기획'은 게임·행사·제품 아이디어 등 거의 모든 분야에서 쓰이므로
+    # 단독으로 경영/마케팅을 뜻한다고 보지 않는다.
+    "경영/컨설팅/마케팅": [
+        "경영", "마케팅", "광고", "홍보", "브랜딩", "컨설팅",
+    ],
     "정치/사회/법률": ["정치", "사회", "법률", "법학", "행정", "정책", "지방자치"],
     "체육/헬스": ["체육", "스포츠", "운동", "헬스", "축구", "농구"],
     "의료/보건": ["의료", "보건", "건강", "병원", "간호", "의약", "바이오"],
     "뷰티/미용/화장품": ["뷰티", "미용", "화장품", "메이크업", "패션"],
-    "과학/공학/기술/IT": ["과학", "공학", "기술", "IT", "소프트웨어", "SW", "인공지능", "AI", "데이터", "코딩", "파이썬", "로봇", "반도체", "해커톤", "캡스톤", "빅데이터", "개발"],
+    "과학/공학/기술/IT": [
+        "과학", "수학", "물리", "화학", "공학", "기술", "IT",
+        "소프트웨어", "SW", "인공지능", "AI", "데이터", "코딩",
+        "파이썬", "로봇", "반도체", "해커톤", "캡스톤", "빅데이터", "개발",
+    ],
     "요리/식품": ["요리", "식품", "음식", "레시피", "외식"],
     "창업/자기계발": ["창업", "스타트업", "자기계발", "진로", "취업역량", "취업"],
     "환경/에너지": ["환경", "에너지", "탄소", "기후", "친환경", "ESG", "넷제로"],
@@ -66,6 +86,10 @@ NEXT_LABELS = [
     "교육기간", "행사기간", "신청방법", "지원방법", "접수방법",
     "제출방법", "활동내용", "교육내용", "활동혜택", "시상내역",
     "문의사항", "문의처", "문의", "장소", "일정", "모집인원",
+    "제출서류", "신청서류", "구비서류", "제출자료", "접수처",
+    "선발절차", "선발방법", "심사방법", "심사기준", "평가방법",
+    "평가항목", "결과발표", "합격자발표", "지원내용", "지급내용",
+    "장학금액", "지급기간", "혜택", "유의사항", "참고사항",
 ]
 
 DATE_PATTERN = r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})"
@@ -147,6 +171,36 @@ def clean_text(text):
 
 def compact_text(text):
     return re.sub(r"\s+", "", clean_text(text))
+
+
+def canonical_activity_url(url):
+    """목록 페이지 위치처럼 공고 자체와 무관한 쿼리를 제거한다."""
+    value = clean_text(url)
+    if not value:
+        return value
+    parts = urlsplit(value)
+    if parts.netloc.lower().endswith("kw.ac.kr"):
+        ignored = {"tpage", "searchKey", "searchVal", "srCategoryId"}
+        query = [
+            (key, val)
+            for key, val in parse_qsl(parts.query, keep_blank_values=True)
+            if key not in ignored
+        ]
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), "")
+        )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
+
+
+def _same_notice_content(left, right):
+    left_text = clean_text(left)
+    right_text = clean_text(right)
+    if not left_text or not right_text:
+        return False
+    if left_text == right_text:
+        return True
+    # 서로 다른 URL로 재등록된 동일 공고만 합치도록 매우 보수적으로 판정한다.
+    return SequenceMatcher(None, left_text, right_text).ratio() >= 0.995
 
 
 def today_kst():
@@ -391,7 +445,9 @@ def init_db():
             name TEXT NOT NULL UNIQUE,
             department TEXT NOT NULL,
             grade INTEGER NOT NULL CHECK(grade BETWEEN 1 AND 4),
+            enrollment_status TEXT DEFAULT 'enrolled',
             interest_categories TEXT NOT NULL,
+            preferred_activity_types TEXT DEFAULT '[]',
             region_sido TEXT NOT NULL,
             region_sigungu TEXT,
             email TEXT,
@@ -400,7 +456,10 @@ def init_db():
             preference_text TEXT DEFAULT '',
             embedding_data TEXT,
             embedding_hash TEXT,
-            embedding_model TEXT
+            embedding_model TEXT,
+            preference_embedding_data TEXT,
+            preference_embedding_hash TEXT,
+            preference_embedding_model TEXT
         )
         """)
 
@@ -418,23 +477,58 @@ def init_db():
             conn.execute(
                 "ALTER TABLE students ADD COLUMN is_international INTEGER DEFAULT 0"
             )
+        if "enrollment_status" not in student_columns:
+            conn.execute(
+                "ALTER TABLE students ADD COLUMN enrollment_status TEXT DEFAULT 'enrolled'"
+            )
         for column_name, column_type in {
+            "preferred_activity_types": "TEXT DEFAULT '[]'",
             "preference_text": "TEXT DEFAULT ''",
             "embedding_data": "TEXT",
             "embedding_hash": "TEXT",
             "embedding_model": "TEXT",
+            "preference_embedding_data": "TEXT",
+            "preference_embedding_hash": "TEXT",
+            "preference_embedding_model": "TEXT",
         }.items():
             if column_name not in student_columns:
                 conn.execute(
                     f"ALTER TABLE students ADD COLUMN {column_name} {column_type}"
                 )
 
+        # 과거 관심분야에 섞여 있던 활동 형태를 새 필드로 안전하게 이동한다.
+        rows = conn.execute(
+            "SELECT id, interest_categories, preferred_activity_types FROM students"
+        ).fetchall()
+        for student_id, raw_interests, raw_types in rows:
+            interests = json.loads(raw_interests or "[]")
+            preferred_types = json.loads(raw_types or "[]")
+            if "행사/페스티벌" in interests:
+                interests = [value for value in interests if value != "행사/페스티벌"]
+                if "행사/페스티벌" not in preferred_types:
+                    preferred_types.append("행사/페스티벌")
+                conn.execute(
+                    """
+                    UPDATE students
+                    SET interest_categories=?, preferred_activity_types=?,
+                        embedding_data=NULL, embedding_hash=NULL, embedding_model=NULL
+                    WHERE id=?
+                    """,
+                    (
+                        json.dumps(interests, ensure_ascii=False),
+                        json.dumps(preferred_types, ensure_ascii=False),
+                        student_id,
+                    ),
+                )
+
 
 def create_student(
     department,
     grade,
+    enrollment_status,
     interest_categories,
     region_sido,
+    preferred_activity_types=None,
     region_sigungu="",
     email=None,
     notify_opt_in=1,
@@ -449,16 +543,18 @@ def create_student(
         cursor = conn.execute(
             """
             INSERT INTO students (
-                name, department, grade, interest_categories,
+                name, department, grade, enrollment_status, interest_categories, preferred_activity_types,
                 region_sido, region_sigungu, email, notify_opt_in, is_international,
                 preference_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
                 department,
                 grade,
+                enrollment_status,
                 json.dumps(interest_categories, ensure_ascii=False),
+                json.dumps(preferred_activity_types or [], ensure_ascii=False),
                 region_sido,
                 region_sigungu,
                 email,
@@ -472,10 +568,32 @@ def create_student(
 
 def save_activity(item):
     now = now_kst_string()
+    item = {**item, "url": canonical_activity_url(item["url"])}
     with sqlite3.connect(DB_NAME) as conn:
         existing = conn.execute(
-            "SELECT id FROM activities WHERE url = ?", (item["url"],)
+            "SELECT id, body_text FROM activities WHERE url = ?", (item["url"],)
         ).fetchone()
+        if existing is None:
+            candidates = conn.execute(
+                """
+                SELECT id, body_text
+                FROM activities
+                WHERE source = ? AND source_section = ? AND title = ?
+                """,
+                (
+                    item["source"],
+                    item.get("source_section", ""),
+                    clean_text(item["title"]),
+                ),
+            ).fetchall()
+            existing = next(
+                (
+                    row
+                    for row in candidates
+                    if _same_notice_content(row[1], item.get("body_text", ""))
+                ),
+                None,
+            )
 
         serialized = {
             **item,
@@ -511,6 +629,7 @@ def save_activity(item):
 
         conn.execute("""
         UPDATE activities SET
+            url=:url,
             source=:source,
             source_section=:source_section,
             campus_scope=:campus_scope,
@@ -533,6 +652,10 @@ def save_activity(item):
             missing_before_ocr=:missing_before_ocr,
             review_required=:review_required,
             last_seen_at=:last_seen_at
-        WHERE url=:url
-        """, {**serialized, "last_seen_at": now})
+        WHERE id=:existing_id
+        """, {
+            **serialized,
+            "last_seen_at": now,
+            "existing_id": existing[0],
+        })
         return False

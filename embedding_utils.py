@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from common import DB_NAME
+from departments import college_of
 
 
 DEFAULT_MODEL = "text-embedding-3-small"
@@ -30,16 +31,30 @@ def student_recommendation_text(student):
             interests = json.loads(interests)
         except json.JSONDecodeError:
             interests = []
-    parts = [
-        f"광운대학교 {student['department']} {student['grade']}학년 재학생",
-    ]
+    college = college_of(student["department"])
+    affiliation = (
+        f"{college} {student['department']}"
+        if college
+        else student["department"]
+    )
+    parts = [f"광운대학교 {affiliation} {student['grade']}학년 재학생"]
     if interests:
         parts.append(f"관심 분야: {', '.join(interests)}")
+    activity_types = student.get("preferred_activity_types") or []
+    if isinstance(activity_types, str):
+        try:
+            activity_types = json.loads(activity_types)
+        except json.JSONDecodeError:
+            activity_types = []
+    if activity_types:
+        parts.append(f"선호 활동 유형: {', '.join(activity_types)}")
     preference = (student.get("preference_text") or "").strip()
     if preference:
         parts.append(f"선호 활동: {preference}")
+    elif interests or activity_types:
+        parts.append("선택한 관심 주제와 활동 유형에 관련된 대학생 활동을 선호함")
     else:
-        parts.append("전공과 관심 분야에 관련된 대학생 활동을 선호함")
+        parts.append("전공과 직접 관련된 대학생 활동을 선호함")
     return ". ".join(parts)
 
 
@@ -103,6 +118,43 @@ def ensure_student_embedding(student):
             WHERE id=?
             """,
             (json.dumps(vector, separators=(",", ":")), current_hash, model, student["id"]),
+        )
+    return vector
+
+
+def ensure_preference_embedding(student):
+    """선호 활동 문장만 별도로 임베딩하고, 문장이 바뀔 때만 다시 생성한다."""
+    preference = (student.get("preference_text") or "").strip()
+    if not preference:
+        return None
+
+    text = f"대학생이 선호하는 활동: {preference}"
+    current_hash = text_hash(text)
+    model = embedding_model()
+    if (
+        student.get("preference_embedding_data")
+        and student.get("preference_embedding_hash") == current_hash
+        and student.get("preference_embedding_model") == model
+    ):
+        return json.loads(student["preference_embedding_data"])
+
+    vectors, _ = embed_texts([text])
+    vector = vectors[0]
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute(
+            """
+            UPDATE students
+            SET preference_embedding_data=?,
+                preference_embedding_hash=?,
+                preference_embedding_model=?
+            WHERE id=?
+            """,
+            (
+                json.dumps(vector, separators=(",", ":")),
+                current_hash,
+                model,
+                student["id"],
+            ),
         )
     return vector
 

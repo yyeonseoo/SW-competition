@@ -5,6 +5,7 @@ import { getDashboard, getMeta } from "@/lib/api";
 import type { ActivityCard, DashboardResponse, MetaResponse } from "@/lib/types";
 import AppHeader from "./AppHeader";
 import CardList from "./CardList";
+import NotificationDrawer from "./NotificationDrawer";
 import ProfileBar from "./ProfileBar";
 import ProfileEditModal from "./ProfileEditModal";
 import TabsBar from "./TabsBar";
@@ -69,22 +70,38 @@ export default function Dashboard({ studentId, onReset }: Props) {
   const [internalCategory, setInternalCategory] = useState("전체");
   const [externalCategory, setExternalCategory] = useState("전체");
   const [modalOpen, setModalOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [showBroadRecommendations, setShowBroadRecommendations] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(() => {
-    getDashboard(studentId)
-      .then(setData)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "불러오기에 실패했어요.")
-      );
+  const load = useCallback(async (showRefreshing = false) => {
+    if (showRefreshing) setRefreshing(true);
+    try {
+      const nextData = await getDashboard(studentId);
+      setData(nextData);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "불러오기에 실패했어요.");
+    } finally {
+      if (showRefreshing) setRefreshing(false);
+    }
   }, [studentId]);
 
   useEffect(() => {
-    load();
+    getDashboard(studentId)
+      .then((nextData) => {
+        setData(nextData);
+        setError(null);
+      })
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : "불러오기에 실패했어요.")
+      );
     getMeta()
       .then(setMeta)
       .catch(() => setMeta(null));
-  }, [load]);
+  }, [studentId]);
 
   if (error) {
     return (
@@ -114,22 +131,29 @@ export default function Dashboard({ studentId, onReset }: Props) {
   }
 
   const avatarLabel = data.student.department.slice(0, 2);
+  const relevanceVisible = (card: ActivityCard) =>
+    showBroadRecommendations ||
+    card.recommendation_score === null ||
+    card.recommendation_score >= 40;
+  const internalCardsByRelevance = data.internal.cards.filter(relevanceVisible);
+  const internalUrgentByRelevance = data.internal.urgent.filter(relevanceVisible);
   const visibleInternalCards =
     internalCategory === "전체"
-      ? data.internal.cards
-      : data.internal.cards.filter(
+      ? internalCardsByRelevance
+      : internalCardsByRelevance.filter(
           (card) => card.activity_category === internalCategory
         );
   const visibleInternalUrgent =
     internalCategory === "전체"
-      ? data.internal.urgent
-      : data.internal.urgent.filter(
+      ? internalUrgentByRelevance
+      : internalUrgentByRelevance.filter(
           (card) => card.activity_category === internalCategory
         );
-  const externalCards =
+  const rawExternalCards =
     externalSource === "kw"
       ? data.external.kw_external_cards
       : data.external.linkareer_cards;
+  const externalCards = rawExternalCards.filter(relevanceVisible);
   const visibleExternalCards =
     externalCategory !== "전체"
       ? externalCards.filter(
@@ -137,11 +161,18 @@ export default function Dashboard({ studentId, onReset }: Props) {
         )
       : externalCards;
   const externalUrgent = data.external.urgent.filter((card) =>
+    relevanceVisible(card) &&
     (externalSource === "kw"
       ? card.source === "광운대학교"
       : card.source === "링커리어") &&
     (externalCategory === "전체" ||
       card.activity_category === externalCategory)
+  );
+  const kwUrgentByRelevance = data.external.urgent.filter(
+    (card) => relevanceVisible(card) && card.source === "광운대학교"
+  );
+  const linkareerUrgentByRelevance = data.external.urgent.filter(
+    (card) => relevanceVisible(card) && card.source === "링커리어"
   );
   const groupedExternalCards = CATEGORY_ORDER
     .map((category) => ({
@@ -152,36 +183,84 @@ export default function Dashboard({ studentId, onReset }: Props) {
     }))
     .filter((group) => group.cards.length > 0);
   const kwCount =
-    data.external.kw_external_cards.length +
-    data.external.urgent.filter((card) => card.source === "광운대학교").length;
+    data.external.kw_external_cards.filter(relevanceVisible).length +
+    kwUrgentByRelevance.length;
   const linkareerCount =
-    data.external.linkareer_cards.length +
-    data.external.urgent.filter((card) => card.source === "링커리어").length;
+    data.external.linkareer_cards.filter(relevanceVisible).length +
+    linkareerUrgentByRelevance.length;
+  const notificationCards = [
+    ...data.internal.urgent,
+    ...data.external.urgent,
+  ];
+  const hiddenLowCount = [
+    ...data.internal.cards,
+    ...data.internal.urgent,
+    ...data.external.kw_external_cards,
+    ...data.external.linkareer_cards,
+    ...data.external.urgent,
+  ].filter(
+    (card) =>
+      card.recommendation_score !== null && card.recommendation_score < 40
+  ).length;
 
   return (
     <section className="view">
-      <AppHeader avatarLabel={avatarLabel} />
-      <ProfileBar
-        student={data.student}
-        onEditClick={() => setModalOpen(true)}
+      <AppHeader
+        avatarLabel={avatarLabel}
+        notificationCount={notificationCards.length}
+        onNotificationsClick={() => {
+          setProfileOpen(false);
+          setNotificationsOpen(true);
+        }}
+        onProfileClick={() => {
+          setNotificationsOpen(false);
+          setProfileOpen(true);
+        }}
       />
-      <TabsBar
-        active={tab}
-        internalCount={data.internal.count}
-        externalCount={data.external.count}
-        onChange={setTab}
-      />
+      <main className="dashboard-main">
+        <header className="dashboard-heading">
+          <span>맞춤 공고</span>
+          <h1>오늘 확인할 새로운 소식</h1>
+          <p>
+            {data.student.department} {data.student.grade}학년의 조건과 관심분야를
+            바탕으로 정리했어요.
+          </p>
+        </header>
+        <TabsBar
+          active={tab}
+          internalCount={internalCardsByRelevance.length + internalUrgentByRelevance.length}
+          externalCount={
+            data.external.kw_external_cards.filter(relevanceVisible).length +
+            data.external.linkareer_cards.filter(relevanceVisible).length +
+            data.external.urgent.filter(relevanceVisible).length
+          }
+          onChange={(nextTab) => {
+            setTab(nextTab);
+            setShowBroadRecommendations(false);
+          }}
+        />
 
-      <div className="content">
+        <div className="content">
         {tab === "internal" && (
           <div className="tab-panel active">
             <CategoryTabs
-              cards={data.internal.cards}
-              urgentCards={data.internal.urgent}
+              cards={internalCardsByRelevance}
+              urgentCards={internalUrgentByRelevance}
               active={internalCategory}
               onChange={setInternalCategory}
               label="교내 프로그램 활동 유형"
             />
+            {hiddenLowCount > 0 && (
+              <button
+                type="button"
+                className="broader-results-toggle"
+                onClick={() => setShowBroadRecommendations((value) => !value)}
+              >
+                {showBroadRecommendations
+                  ? "관련도 낮은 공고 숨기기"
+                  : "추천 범위 넓게 보기"}
+              </button>
+            )}
             <UrgentSection cards={visibleInternalUrgent} />
             <div className="section-head" style={{ marginTop: 32 }}>
               <h3>{internalCategory === "전체" ? "전체 공고" : internalCategory}</h3>
@@ -203,6 +282,7 @@ export default function Dashboard({ studentId, onReset }: Props) {
                 onClick={() => {
                   setExternalSource("kw");
                   setExternalCategory("전체");
+                  setShowBroadRecommendations(false);
                 }}
               >
                 광운대 공지 <span>{kwCount}</span>
@@ -213,6 +293,7 @@ export default function Dashboard({ studentId, onReset }: Props) {
                 onClick={() => {
                   setExternalSource("linkareer");
                   setExternalCategory("전체");
+                  setShowBroadRecommendations(false);
                 }}
               >
                 링커리어 <span>{linkareerCount}</span>
@@ -221,25 +302,44 @@ export default function Dashboard({ studentId, onReset }: Props) {
 
             <CategoryTabs
               cards={externalCards}
-              urgentCards={data.external.urgent.filter((card) =>
+              urgentCards={
                 externalSource === "kw"
-                  ? card.source === "광운대학교"
-                  : card.source === "링커리어"
-              )}
+                  ? kwUrgentByRelevance
+                  : linkareerUrgentByRelevance
+              }
               active={externalCategory}
               onChange={setExternalCategory}
               label={`${
                 externalSource === "kw" ? "광운대 공지" : "링커리어"
               } 활동 유형`}
             />
+            {hiddenLowCount > 0 && (
+              <button
+                type="button"
+                className="broader-results-toggle"
+                onClick={() => setShowBroadRecommendations((value) => !value)}
+              >
+                {showBroadRecommendations
+                  ? "관련도 낮은 공고 숨기기"
+                  : "추천 범위 넓게 보기"}
+              </button>
+            )}
 
             <UrgentSection cards={externalUrgent} />
 
-            {groupedExternalCards.length === 0 ? (
+            {visibleExternalCards.length === 0 ? (
               <CardList
                 cards={[]}
                 emptyText="조건에 맞는 교외활동이 아직 없어요."
               />
+            ) : externalCategory === "전체" ? (
+              <section className="category-section">
+                <div className="section-head">
+                  <h3>전체 공고</h3>
+                  <span className="meta">추천순</span>
+                </div>
+                <CardList cards={visibleExternalCards} />
+              </section>
             ) : (
               groupedExternalCards.map((group) => (
                 <section className="category-section" key={group.category}>
@@ -253,16 +353,44 @@ export default function Dashboard({ studentId, onReset }: Props) {
             )}
           </div>
         )}
-      </div>
+        </div>
+      </main>
+
+      {refreshing && (
+        <div className="recommendation-loading" role="status" aria-live="polite">
+          <div className="recommendation-loading-card">
+            <span className="loading-spinner" aria-hidden="true" />
+            <div>
+              <strong>수정사항을 반영하고 있어요</strong>
+              <p>새 프로필 기준으로 추천 공고를 다시 정리하는 중이에요.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ProfileBar
+        student={data.student}
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        onEditClick={() => {
+          setProfileOpen(false);
+          setModalOpen(true);
+        }}
+      />
+      <NotificationDrawer
+        open={notificationsOpen}
+        cards={notificationCards}
+        onClose={() => setNotificationsOpen(false)}
+      />
 
       {modalOpen && (
         <ProfileEditModal
           student={data.student}
           meta={meta}
           onClose={() => setModalOpen(false)}
-          onSaved={() => {
+          onSaved={async () => {
+            await load(true);
             setModalOpen(false);
-            load();
           }}
         />
       )}
