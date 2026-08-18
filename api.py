@@ -1,4 +1,7 @@
+import os
+import shutil
 import sqlite3
+from pathlib import Path
 from typing import List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -18,9 +21,16 @@ from regions import REGIONS
 
 app = FastAPI(title="KW-LIFE API")
 
+cors_origins = ["http://localhost:3000"]
+cors_origins.extend(
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,7 +38,16 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
+    database_path = Path(DB_NAME)
+    seed_path = Path(os.getenv("DEPLOY_SEED_DB", "deploy_seed.db"))
+    if not database_path.exists() and seed_path.exists():
+        shutil.copyfile(seed_path, database_path)
     init_db()
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 class StudentIn(BaseModel):
