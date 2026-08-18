@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kw-life-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DEPLOY_SEED_DB
+        value: deploy_seed.db
+      - key: CORS_ORIGINS
+        sync: false
